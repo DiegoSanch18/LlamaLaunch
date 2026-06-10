@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Local — Desktop Inference Suite</title>
+    <!-- Modern typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Outfit:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=2">
+</head>
+
+<body>
+    <div class="app-container">
+
+        <!-- Navigation Header -->
+        <header class="app-header">
+            <div class="brand">
+                <span class="logo-icon">🧠</span>
+                <div class="brand-text">
+                    <h1>AI LOCAL</h1>
+                    <span class="version">v2.1.2 Desktop</span>
+                </div>
+            </div>
+            <nav class="app-tabs">
+                <button class="tab-btn active" id="tab-control-btn" onclick="switchTab('control')">Control
+                    Dashboard</button>
+                <button class="tab-btn" id="tab-download-btn" onclick="switchTab('download')">Download Library</button>
+            </nav>
+        </header>
+
+        <!-- Main Body -->
+        <main class="app-body">
+
+            <!-- VIEW 1: CONTROL CENTER -->
+            <section class="tab-view active" id="view-control">
+                <div class="control-layout">
+
+                    <!-- Left Sidebar: Settings Panel -->
+                    <aside class="settings-sidebar card">
+                        <div class="card-header">
+                            <h2>Server Configuration</h2>
+                            <p class="subtitle">Customize hardware offloads and performance</p>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="select-engine">Execution Engine</label>
+                            <select id="select-engine" onchange="onEngineOrPqChange()">
+                                <option value="CPU">CPU Only (Universal / Lightweight)</option>
+                                <option value="CUDA" id="opt-cuda">NVIDIA GPU CUDA (Hardware Accelerated)</option>
+                                <option value="VULKAN" id="opt-vulkan">VULKAN GPU (AMD / Intel / Generic)</option>
+                            </select>
+                        </div>
+
+                        <!-- 1. Category Selection added as requested -->
+                        <div class="form-group">
+                            <label for="select-category">Model Category</label>
+                            <select id="select-category" onchange="onCategoryChange()">
+                                <option value="edge">EDGE</option>
+                                <option value="large">LARGE</option>
+                                <option value="coder">CODER</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="select-model">Local GGUF Model</label>
+                            <select id="select-model" onchange="onModelSelectChange()">
+                                <!-- Dynamic filtered options loaded here -->
+                            </select>
+                        </div>
+
+                        <div class="form-group" id="custom-path-group" style="display: none;">
+                            <label for="input-custom-model">Custom GGUF File Path</label>
+                            <div class="input-with-action">
+                                <input type="text" id="input-custom-model" placeholder="C:\path\to\model.gguf">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="input-threads">CPU Threads</label>
+                                <input type="number" id="input-threads" min="1" value="4">
+                            </div>
+                            <div class="form-group">
+                                <label for="input-ngl">GPU Layers (ngl)</label>
+                                <input type="number" id="input-ngl" min="0" max="999" value="0">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="input-context">Context Size (Tokens)</label>
+                                <input type="number" id="input-context" min="8192" max="131072" step="512" value="8192">
+                            </div>
+                            <div class="form-group">
+                                <label for="input-port">Local Port</label>
+                                <input type="number" id="input-port" min="1024" max="65535" value="8080">
+                            </div>
+                        </div>
+
+                        <!-- 2. PolarQuant interactive checkbox -->
+                        <div class="form-group checkbox-group">
+                            <input type="checkbox" id="check-pq-enable" onchange="onPqCheckboxChange()">
+                            <label for="check-pq-enable">Enable KV Cache Compression (PolarQuant)</label>
+                        </div>
+
+                        <div class="form-group" id="pq-mode-group"
+                            style="display: none; padding-left: 20px; transition: var(--transition);">
+                            <label for="select-pq-mode">Compression Level</label>
+                            <select id="select-pq-mode" onchange="onEngineOrPqChange()">
+                                <option value="4">Ultra Performance Mode (3-bit q3_K)</option>
+                                <option value="1">Performance Mode (4-bit q4_0)</option>
+                                <option value="5">Balanced Mode (5-bit q5_0)</option>
+                                <option value="6">High Quality Mode (6-bit q6_K)</option>
+                                <option value="2">Max Quality Mode (8-bit q8_0)</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group checkbox-group">
+                            <input type="checkbox" id="check-shift" checked>
+                            <label for="check-shift">Enable Context Shifting (Avoid OOM Crashes)</label>
+                        </div>
+
+                        <div class="action-zone">
+                            <button id="btn-toggle-server" class="btn-primary start" onclick="toggleServer()">
+                                <span class="btn-icon">▶</span> <span id="btn-text">START SERVER</span>
+                            </button>
+                        </div>
+                    </aside>
+
+                    <!-- Right Main Content: Status Dashboard and Logs Console -->
+                    <div class="dashboard-area">
+
+                        <!-- Status Panel Card -->
+                        <div class="card status-card">
+                            <div class="status-summary">
+                                <div class="status-badge" id="service-status-badge">
+                                    <span class="status-dot"></span>
+                                    <span class="status-text" id="lbl-status-text">STOPPED</span>
+                                </div>
+                                <div class="model-info-block">
+                                    <span class="info-label">Active Model</span>
+                                    <span class="info-val" id="lbl-active-model">None (Server inactive)</span>
+                                </div>
+                            </div>
+
+                            <hr class="divider">
+
+                            <div class="status-details">
+                                <div class="detail-item">
+                                    <span class="info-label">API Endpoint</span>
+                                    <div class="endpoint-copy">
+                                        <span class="info-val code-text" id="lbl-endpoint">http://localhost:8080</span>
+                                        <button class="btn-icon-only" onclick="copyEndpoint()"
+                                            title="Copy API Endpoint">📋</button>
+                                    </div>
+                                </div>
+                                <div class="detail-item actions-cell">
+                                    <button class="btn-secondary" id="btn-open-webui" onclick="openWebUI()" disabled>
+                                        🌐 Open in Browser
+                                    </button>
+                                    <button class="btn-secondary" onclick="openSystemFolder('logs')">
+                                        📁 View History Logs
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Logs Console Widget -->
+                        <div class="card console-card">
+                            <div class="console-header">
+                                <div class="header-left">
+                                    <span class="console-dot red"></span>
+                                    <span class="console-dot yellow"></span>
+                                    <span class="console-dot green"></span>
+                                    <h3>Live Server Console</h3>
+                                </div>
+                                <span class="console-subtitle" id="lbl-active-log">active_server.log</span>
+                            </div>
+                            <div class="console-terminal" id="console-terminal">
+                                <div class="console-line system">[SYSTEM] Welcome to AI Local Desktop. Configure
+                                    hardware options and start server.</div>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            </section>
+
+            <!-- VIEW 2: DOWNLOAD MODELS LIBRARY -->
+            <section class="tab-view" id="view-download">
+                <div class="download-layout card">
+                    <!--<div class="card-header">
+                        <h2>Hugging Face Model Library</h2>
+                        <p class="subtitle">Direct single-click downloads automatically integrated into your local categories (Ollama Pull style)</p>
+                    </div>-->
+
+                    <!-- Downloader Panel (Shows when actively downloading) -->
+                    <div class="active-download-card" id="active-download-card" style="display: none;">
+                        <div class="download-meta">
+                            <div class="meta-left">
+                                <h3 id="lbl-downloading-name">Downloading Model...</h3>
+                                <p class="speed-meta"><span id="lbl-download-speed">0.00</span> MB/s — <span
+                                        id="lbl-download-bytes">0.0/0.0</span> MB</p>
+                            </div>
+                            <div class="meta-right"
+                                style="display: flex; flex-direction: column; align-items: flex-end; gap: 8px;">
+                                <span class="time-meta">Elapsed Time: <span id="lbl-download-time">0</span>s</span>
+                                <button class="btn-secondary" onclick="cancelActiveDownload()"
+                                    style="background-color: rgba(244, 63, 94, 0.12); border-color: rgba(244, 63, 94, 0.3); color: var(--accent-rose); padding: 4px 10px; font-size: 11px; font-weight: 600; cursor: pointer; transition: var(--transition);">Cancel
+                                    Download</button>
+                            </div>
+                        </div>
+                        <div class="progress-container">
+                            <div class="progress-bar" id="download-progress-bar" style="width: 0%;"></div>
+                        </div>
+                        <div class="progress-percent" id="lbl-download-percent">0%</div>
+                    </div>
+
+                    <!-- Unified Search & Download Section -->
+                    <div class="hf-search-section" style="flex-shrink: 0;">
+                        <div class="section-header-row"
+                            style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+                            <div>
+                                <h3 style="font-size: 15px; font-weight: 600; margin-bottom: 4px;">Search Hub or
+                                    Download Custom GGUF</h3>
+                                <p class="subtitle" style="margin-bottom: 0;">Type keywords to search Hugging Face, or
+                                    paste a direct .gguf URL to download</p>
+                            </div>
+                            <button class="btn-secondary" onclick="openSystemFolder('models')"
+                                style="padding: 6px 12px; font-size: 12px; display: flex; align-items: center; gap: 6px; white-space: nowrap; margin-top: -2px;">
+                                📁 Open Local Models Folder
+                            </button>
+                        </div>
+                        <div class="search-form"
+                            style="display: flex; gap: 12px; margin-bottom: 20px; align-items: center;">
+                            <input type="text" id="input-unified-search"
+                                placeholder="Type keywords (e.g. Llama-3) OR paste direct URL (https://...)"
+                                style="flex: 1;" oninput="onUnifiedInput()"
+                                onkeydown="if(event.key === 'Enter') handleUnifiedAction()">
+                            <select id="select-custom-cat" style="display: none; flex: 0 0 120px;">
+                                <option value="edge">EDGE</option>
+                                <option value="large" selected>LARGE</option>
+                                <option value="coder">CODER</option>
+                            </select>
+                            <button class="btn-primary" id="btn-unified-action" onclick="handleUnifiedAction()"
+                                style="flex: 0 0 180px; height: 42px;">🔍 Search Hub</button>
+                        </div>
+                    </div>
+
+                    <!-- Search Results Grid Section -->
+                    <div id="search-results-section"
+                        style="display: none; border-bottom: 1px solid var(--border-color); padding-bottom: 24px; margin-bottom: 24px; flex-shrink: 0;">
+                        <div class="section-header-row"
+                            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                            <h3 style="font-size: 16px; font-weight: 600; color: var(--accent-blue);">Search Results
+                            </h3>
+                            <button class="btn-secondary" onclick="clearSearchResults()"
+                                style="padding: 4px 10px; font-size: 11px;">Clear Results</button>
+                        </div>
+                        <div class="models-grid" id="hf-search-results"
+                            style="max-height: 320px; overflow-y: auto; padding-right: 8px;">
+                            <!-- Dynamically loaded search result cards -->
+                        </div>
+                    </div>
+
+                    <!-- Local Model Management Section -->
+                    <div class="local-models-section"
+                        style="display: flex; flex-direction: column; flex: 1; min-height: 0; border-top: 1px solid var(--border-color); padding-top: 20px; margin-top: 10px; margin-bottom: 12px;">
+                        <h3 style="font-size: 15px; font-weight: 600; margin-bottom: 4px;">Downloaded Local Models
+                            Library</h3>
+                        <p class="subtitle" style="margin-bottom: 16px;">Manage your downloaded .gguf models. Click
+                            delete to free up disk space.</p>
+
+                        <div class="models-table-container" id="local-models-table-container"
+                            style="flex: 1; overflow: hidden;">
+                            <table class="models-table">
+                                <thead>
+                                    <tr>
+                                        <th class="sortable" data-sort-key="name" onclick="sortLocalModelsBy('name')">
+                                            Name</th>
+                                        <th class="sortable" data-sort-key="category"
+                                            onclick="sortLocalModelsBy('category')">Category</th>
+                                        <th class="sortable" data-sort-key="parameters"
+                                            onclick="sortLocalModelsBy('parameters')">Parameters</th>
+                                        <th class="sortable" data-sort-key="size_gb"
+                                            onclick="sortLocalModelsBy('size_gb')">Size</th>
+                                        <th class="sortable" data-sort-key="download_date"
+                                            onclick="sortLocalModelsBy('download_date')">Download Date</th>
+                                        <th class="sortable" data-sort-key="last_used"
+                                            onclick="sortLocalModelsBy('last_used')">Last Used</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="local-models-tbody">
+                                    <!-- Downloaded local models will be listed here dynamically -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- Script imports -->
+    <script src="main.js"></script>
+    <script src="manager.js"></script>
+    <script src="downloader.js"></script>
+</body>
+
+</html>

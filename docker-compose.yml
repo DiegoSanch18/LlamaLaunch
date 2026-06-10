@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  llama-launcher:
+    build: .
+    container_name: llama-launcher-webtop
+    security_opt:
+      - seccomp:unconfined # Opcional pero recomendado para Webtop
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+    ports:
+      - 3000:3000  # Interfaz gráfica (WebTop)
+      - 8080:8080  # Puerto por defecto donde corre llama-server
+    volumes:
+      - ./models:/app/models
+      - ./llamaLauncher/logs:/app/llamaLauncher/logs
+    shm_size: "2gb" # Previene cierres inesperados del navegador en Webtop
+    restart: unless-stopped

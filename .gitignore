@@ -1,0 +1,32 @@
+# ====================================================================
+# ARCHIVOS Y CARPETAS EXCLUIDOS DE GITHUB
+# ====================================================================
+
+# Ignorar los modelos de IA por su gran tamaño (varios GBs)
+models/
+
+# Ignorar logs de ejecución dinámicos
+logs/
+
+# Ignorar binarios pesados compilados de C/C++ y CUDA
+llamaLauncher/bin/
+bin/
+build/
+dist/
+
+# Ignorar entornos virtuales de Python (si usas venv o .venv)
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.exe
+*.dll
+
+# Ignorar configuraciones locales que contengan API Keys o credenciales personales
+.env
+*.local
+config.json
+
+# Archivos temporales del sistema operativo
+.DS_Store
+Thumbs.db

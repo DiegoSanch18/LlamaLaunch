@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    restart: unless-stopped
+    ports:
+      - "3000:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - open-webui-data:/app/backend/data
+      - c:\temp\AI Local\services\skills\sqlite:/app/backend/sqlite:ro
+    environment:
+      - WEBUI_NAME=Local AI Workspace
+      - HF_HUB_DISABLE_SYMLINKS_WARNING=1
+      # Descomenta la línea de abajo si quieres desactivar el registro público de nuevos usuarios
+      # - ENABLE_SIGNUP=False
+
+volumes:
+  open-webui-data:

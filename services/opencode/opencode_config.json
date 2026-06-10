@@ -1,0 +1,49 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "llama-cpp": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Llama.cpp Local Server",
+      "options": {
+        "baseURL": "http://127.0.0.1:8080/v1"
+      },
+      "models": {
+        "google_gemma-4-E2B-it-Q4_K_M.gguf": {
+          "name": "Gemma 4 E2B (local)",
+          "limit": {
+            "context": 6692,
+            "output": 4096
+          }
+        },
+        "Llama-3.2-3B-Instruct-Q5_K_M.gguf": {
+          "name": "Llama 3.2 3B (local)",
+          "limit": {
+            "context": 6692,
+            "output": 4096
+          }
+        },
+        "gemma-2-2b-it-Q5_K_M.gguf": {
+          "name": "Gemma 2 2B (local)",
+          "limit": {
+            "context": 6692,
+            "output": 4096
+          }
+        }
+      }
+    }
+  },
+  "mcpServers": {
+    "sqlite-local": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sqlite",
+        "--db-path",
+        "c:\\temp\\AI Local\\services\\skills\\sqlite\\inventario.db"
+      ],
+      "env": {
+        "PATH": "C:\\Program Files\\nodejs\\;%PATH%"
+      }
+    }
+  }
+}
