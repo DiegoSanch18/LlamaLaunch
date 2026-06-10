@@ -2,6 +2,12 @@
 # ARCHIVOS Y CARPETAS EXCLUIDOS DE GITHUB
 # ====================================================================
 
+# Ignorar otras carpetas del proyecto matriz que no son del launcher
+Skills/
+claude-code-main/
+docs/
+services/
+
 # Ignorar los modelos de IA por su gran tamaño (varios GBs)
 models/
 
