@@ -25,18 +25,20 @@ def optimize_params(dev_type: str, physical_cores: int, pq_choice: str = "3") ->
 
     # 4. Adjust context size based on PolarQuant choice
     context_multiplier = 1024  # Base multiplier for context size    
-    if pq_choice == "4":
-        config["context"] = 32 * context_multiplier  # 32K for Ultra Performance Mode
-    elif pq_choice == "1":
-        config["context"] = 32 * context_multiplier  # 32K for Performance Mode
+    if pq_choice in ("4", "1"):
+        base_context = 32 * context_multiplier  # 32K for Ultra Performance / Performance Mode
     elif pq_choice == "5":
-        config["context"] = 24 * context_multiplier  # 24K for Balanced Mode
-    elif pq_choice == "6":
-        config["context"] = 16 * context_multiplier  # 16K for High Quality Mode
-    elif pq_choice == "2":
-        config["context"] = 16 * context_multiplier  # 16K for Max Quality Mode
+        base_context = 24 * context_multiplier  # 24K for Balanced Mode
+    elif pq_choice in ("6", "2"):
+        base_context = 16 * context_multiplier  # 16K for High / Max Quality Mode
     else:
-        config["context"] = 8 * context_multiplier  # 8K for Standard Mode
+        base_context = 8 * context_multiplier  # 8K for Standard Mode
+
+    # Cap context for CPU execution to prevent system RAM starvation and compute stalls
+    if dev_type == "CPU":
+        config["context"] = min(base_context, 16 * context_multiplier)
+    else:
+        config["context"] = base_context
     return config
 
 def get_polar_quant_flags(pq_choice: str) -> Tuple[str, str]:

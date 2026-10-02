@@ -169,6 +169,82 @@ class ProcessManager:
                 self.status = "STOPPED"
                 return {"success": False, "message": f"Failed to launch subprocess: {str(e)}"}
 
+    def start_batch_server(self, bat_path: Path, port: int, logs_dir: Path) -> Dict[str, Any]:
+        """
+        Launches a model's .bat script directly as a supervised subprocess group.
+        Monitors output in active_server.log and checks /health endpoint.
+        """
+        with self._lock:
+            if self.status in ("LOADING", "RUNNING"):
+                return {"success": False, "message": "The server is already active or loading."}
+
+            if not bat_path.exists():
+                return {"success": False, "message": f"Batch file does not exist: {bat_path}"}
+
+            self.status = "LOADING"
+            self.active_port = port
+            self.active_model = bat_path.name
+
+            # Setup logs
+            logs_dir.mkdir(parents=True, exist_ok=True)
+            self.active_log_path = logs_dir / "active_server.log"
+            self.history_log_path = logs_dir / "server_history.log"
+
+            # Clean active log
+            if self.active_log_path.exists():
+                try:
+                    self.active_log_path.unlink()
+                except Exception:
+                    pass
+
+            # Log history
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            try:
+                with open(self.history_log_path, "a", encoding="utf-8") as f:
+                    f.write(f"[{timestamp}] Launched Batch: {bat_path.name} | Port: {port}\n")
+            except Exception:
+                pass
+
+            # Terminate any leftover instances
+            self.kill_all_zombies()
+            self.status = "LOADING"
+
+            try:
+                log_file = open(self.active_log_path, "w", encoding="utf-8")
+
+                creation_flags = 0
+                if sys.platform == "win32":
+                    creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP
+                    cmd = ["cmd.exe", "/c", str(bat_path)]
+                else:
+                    cmd = ["bash", str(bat_path)]
+
+                self.process = subprocess.Popen(
+                    cmd,
+                    cwd=str(bat_path.parent),
+                    stdout=log_file,
+                    stderr=log_file,
+                    creationflags=creation_flags
+                )
+
+                self.stop_monitor_event.clear()
+                self.monitor_thread = threading.Thread(
+                    target=self._monitor_server_lifecycle,
+                    args=(port, log_file),
+                    daemon=True
+                )
+                self.monitor_thread.start()
+
+                return {
+                    "success": True,
+                    "pid": self.process.pid,
+                    "port": port,
+                    "message": f"Batch script {bat_path.name} started in background. Loading weights..."
+                }
+            except Exception as e:
+                self.status = "STOPPED"
+                return {"success": False, "message": f"Failed to execute batch script: {str(e)}"}
+
     def stop_server(self) -> Dict[str, Any]:
         """
         Safely stops the active server.

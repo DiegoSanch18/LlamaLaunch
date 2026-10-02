@@ -8,10 +8,28 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
-from llamaLauncher.app.backend.manager import ProcessManager
-import llamaLauncher.app.backend.hardware as hardware
-import llamaLauncher.app.backend.config as config
-import llamaLauncher.app.backend.models as models
+try:
+    from llamaLauncher.app.backend.manager import ProcessManager
+    import llamaLauncher.app.backend.hardware as hardware
+    import llamaLauncher.app.backend.config as config
+    import llamaLauncher.app.backend.models as models
+    import llamaLauncher.app.backend.binaries as binaries
+    import llamaLauncher.app.backend.batch_manager as batch_manager
+except ImportError:
+    try:
+        from app.backend.manager import ProcessManager
+        import app.backend.hardware as hardware
+        import app.backend.config as config
+        import app.backend.models as models
+        import app.backend.binaries as binaries
+        import app.backend.batch_manager as batch_manager
+    except ImportError:
+        from manager import ProcessManager  # type: ignore
+        import hardware  # type: ignore
+        import config  # type: ignore
+        import models  # type: ignore
+        import binaries  # type: ignore
+        import batch_manager  # type: ignore
 
 class ApiBridge:
     """
@@ -34,15 +52,18 @@ class ApiBridge:
             # backend_dir = project_root/llamaLauncher/app/backend
             self.project_root = self.backend_dir.parent.parent.parent
         
-        self.models_dir = self.project_root / "models"
-        self.bin_root = self.project_root / "llamaLauncher" / "bin" / "llama.cpp"
+        # Dynamic root resolution (Priority to external G:\My Drive\, fallback to local repo)
+        self.models_dir = binaries.resolve_models_dir(self.project_root)
+        self.bin_root = binaries.resolve_bin_root(self.project_root)
         self.logs_dir = self.project_root / "llamaLauncher" / "logs"
         self.history_file = self.logs_dir / "history.json"
         
         # Ensure directories exist
         try:
-            self.models_dir.mkdir(parents=True, exist_ok=True)
-            self.bin_root.mkdir(parents=True, exist_ok=True)
+            if not self.models_dir.exists():
+                self.models_dir.mkdir(parents=True, exist_ok=True)
+            if not self.bin_root.exists():
+                self.bin_root.mkdir(parents=True, exist_ok=True)
             self.logs_dir.mkdir(parents=True, exist_ok=True)
         except Exception as e:
             print(f"[WARN] Could not create directories: {e}")
@@ -132,6 +153,159 @@ class ApiBridge:
                 })
         return results
 
+    def scan_models_and_batches(self) -> Dict[str, Any]:
+        """
+        Exposed API method for the Frontend Combobox (R1 & R3).
+        Returns hierarchically grouped models, weights, vision projectors,
+        speculative drafts, dedicated binary indicators, and batch scripts.
+        """
+        try:
+            res = models.scan_models_and_batches(self.models_dir)
+            if not res.get("success"):
+                return res
+
+            # Enrich models with last_used timestamp from history.json
+            history = {}
+            if self.history_file.exists():
+                try:
+                    with open(self.history_file, 'r', encoding='utf-8') as f:
+                        history = json.load(f)
+                except Exception:
+                    pass
+
+            for m in res.get("models", []):
+                # Check history using model id or primary weight filename
+                if m.get("weights"):
+                    primary_file = m["weights"][0]["filename"]
+                    m["last_used"] = history.get(primary_file, history.get(m["id"], "Never"))
+
+            return res
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Error scanning models and batches: {str(e)}",
+                "root_dir": str(self.models_dir),
+                "total_models": 0,
+                "models": [],
+                "pending_models": []
+            }
+
+    def resolve_model_binary(self, folder_path: str = "", dev_type: str = "CUDA") -> Dict[str, Any]:
+        """
+        Pywebview bridge endpoint to resolve binary for a given model folder.
+        """
+        model_folder = Path(folder_path) if folder_path else None
+        return binaries.resolve_model_binary(
+            model_folder=model_folder,
+            bin_root=self.bin_root,
+            dev_type=dev_type
+        )
+
+    def get_available_binaries(self) -> Dict[str, Any]:
+        """
+        Pywebview bridge endpoint returning all generic binaries in bin_root.
+        """
+        try:
+            bins = binaries.scan_generic_binaries(self.bin_root)
+            serializable = []
+            for b in bins:
+                item = dict(b)
+                item["dir_path"] = str(item["dir_path"])
+                item["exe_path"] = str(item["exe_path"])
+                serializable.append(item)
+            return {"success": True, "binaries": serializable}
+        except Exception as e:
+            return {"success": False, "binaries": [], "error": str(e)}
+
+    def get_model_batch_details(self, model_id: str) -> Dict[str, Any]:
+        """
+        Gets the .bat configuration for a selected model (Combobox handler).
+        If the model already has a .bat script, parses its settings.
+        If no .bat exists, auto-generates a calibrated .bat template and parses it.
+        Also resolves the active binary (dedicated priority + generic fallback).
+        """
+        try:
+            scan_res = self.scan_models_and_batches()
+            target_model = None
+            for m in scan_res.get("models", []):
+                if m.get("id") == model_id:
+                    target_model = m
+                    break
+
+            if not target_model:
+                return {"success": False, "error": f"Model '{model_id}' not found."}
+
+            folder = Path(target_model["folder_path"])
+            is_newly_generated = False
+            bat_path = None
+
+            # 1. Check existing batch scripts
+            if target_model.get("batch_scripts"):
+                bat_path = Path(target_model["batch_scripts"][0]["path"])
+            else:
+                # 2. Auto-generate a calibrated .bat template
+                weights = target_model.get("weights", [])
+                if not weights:
+                    return {"success": False, "error": "No model weights found to generate batch script."}
+                
+                model_file = weights[0]["filename"]
+                mmproj_file = target_model["mmproj"][0]["filename"] if target_model.get("mmproj") else None
+                family = target_model.get("family", "")
+                variant = target_model.get("variant", "")
+
+                slug = target_model["id"].replace("_", "-")
+                bat_path = folder / f"run-{slug}.bat"
+                
+                content = batch_manager.generate_batch_template(
+                    model_folder=folder,
+                    model_filename=model_file,
+                    mmproj_filename=mmproj_file,
+                    family_name=family,
+                    variant_name=variant
+                )
+                save_res = batch_manager.save_batch_script(bat_path, content, create_backup=False)
+                if not save_res.get("success"):
+                    return save_res
+                is_newly_generated = True
+
+            # 3. Parse batch configuration
+            parsed = batch_manager.parse_batch_script(bat_path)
+            
+            # 4. Binary resolution
+            bin_res = binaries.resolve_model_binary(
+                model_folder=folder,
+                bin_root=self.bin_root,
+                dev_type="CUDA"
+            )
+
+            parsed["is_newly_generated"] = is_newly_generated
+            parsed["binary_info"] = bin_res
+            parsed["model_info"] = target_model
+            return parsed
+        except Exception as e:
+            return {"success": False, "error": f"Error loading model batch: {str(e)}"}
+
+    def save_batch_script(self, bat_path: str, raw_content: str, create_backup: bool = True) -> Dict[str, Any]:
+        """
+        Saves updated content to a .bat script with automatic .bat.bak backup.
+        """
+        try:
+            return batch_manager.save_batch_script(Path(bat_path), raw_content, create_backup=create_backup)
+        except Exception as e:
+            return {"success": False, "error": f"Error saving batch script: {str(e)}"}
+
+    def launch_batch_script(self, bat_path: str, port: int = 8080) -> Dict[str, Any]:
+        """
+        Launches a model's .bat script directly as a supervised subprocess group.
+        """
+        try:
+            res = self.manager.start_batch_server(Path(bat_path), port=port, logs_dir=self.logs_dir)
+            if res.get("success"):
+                self._record_model_usage(Path(bat_path).name)
+            return res
+        except Exception as e:
+            return {"success": False, "message": f"Error launching batch script: {str(e)}"}
+
     def delete_local_model(self, category: str, filename: str) -> Dict[str, Any]:
         """
         Permanently deletes a downloaded local GGUF model file.
@@ -193,38 +367,21 @@ class ApiBridge:
             if not model_path.exists():
                 return {"success": False, "message": f"Model file does not exist: {model_path}"}
 
-            # 1. Resolve Engine Binary Path
-            dev_type_lower = engine.lower()
-            bin_dir = None
-            
-            # Scan modern directories like bin/llama.cpp/llama-*-bin-win-cpu-x64
-            for folder in self.bin_root.glob(f"llama-*-bin-win-{dev_type_lower}-x64"):
-                exe_name = "llama-server.exe" if sys.platform == "win32" else "llama-server"
-                if (folder / exe_name).exists():
-                    bin_dir = folder
-                    break
-            
-            # Windows fallback scans
-            if not bin_dir and sys.platform == "win32":
-                for folder in self.bin_root.iterdir():
-                    if folder.is_dir() and engine in folder.name.upper():
-                        if "CUDART" not in folder.name.upper() and (folder / "llama-server.exe").exists():
-                            bin_dir = folder
-                            break
-            
-            # Ultimate default bin folder
-            if not bin_dir:
-                if sys.platform == "win32":
-                    bin_dir = self.bin_root / f"llama-b9283-bin-win-{dev_type_lower}-x64"
-                else:
-                    # Unix standard search or fallback
-                    bin_dir = self.bin_root
+            # 1. Resolve Engine Binary Path (Dedicated priority + Generic fallback)
+            bin_info = binaries.resolve_model_binary(
+                model_folder=model_path.parent,
+                bin_root=self.bin_root,
+                dev_type=engine
+            )
+            if not bin_info.get("success") or not bin_info.get("binary_dir"):
+                return {
+                    "success": False,
+                    "message": f"Could not resolve engine binary for {engine}: {bin_info.get('error', 'Unknown error')}"
+                }
 
-            # 2. DLL Check for CUDA acceleration
-            if engine == "CUDA" and sys.platform == "win32":
-                hardware.check_and_copy_cuda_dlls(bin_dir, self.bin_root)
+            bin_dir = Path(bin_info["binary_dir"])
 
-            # 3. Resolve PolarQuant Flags
+            # 2. Resolve PolarQuant Flags
             polar_flags, _ = config.get_polar_quant_flags(pq_choice)
 
             res = self.manager.start_server(
