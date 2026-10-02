@@ -59,3 +59,42 @@ def get_polar_quant_flags(pq_choice: str) -> Tuple[str, str]:
     else:
         # Standard Mode
         return "", "Disabled (Standard FP16)"
+
+def patch_pywebview_bottle() -> bool:
+    """
+    Hotfix for pywebview 5.x / Bottle routing on Python 3.13+:
+    When http_server=True, pywebview registers static assets using:
+        @app.route('/')
+        @app.route('/<file:path>')
+        def asset(file):
+    When requesting the root URL '/', Bottle calls asset() without arguments,
+    causing 'TypeError: asset() missing 1 required positional argument: file' (HTTP 500).
+    This patch ensures that if 'file' has no default, it defaults to 'index.html'.
+    Returns True if patch applied or already active, False if failed.
+    """
+    try:
+        import inspect
+        import bottle
+        if getattr(bottle.Bottle, '_llamalaunch_patched', False):
+            return True
+        _orig_route = bottle.Bottle.route
+        def _safe_route(self, path=None, method='GET', callback=None, **options):
+            decorator = _orig_route(self, path, method, callback, **options)
+            def wrapper(func):
+                try:
+                    sig = inspect.signature(func)
+                    if 'file' in sig.parameters and sig.parameters['file'].default is inspect.Parameter.empty:
+                        def fixed_asset(file='index.html', *args, **kwargs):
+                            return func(file, *args, **kwargs)
+                        return decorator(fixed_asset)
+                except Exception:
+                    pass
+                return decorator(func)
+            return wrapper if callback is None else wrapper(callback)
+        bottle.Bottle.route = _safe_route
+        bottle.Bottle._llamalaunch_patched = True
+        return True
+    except Exception as e:
+        print(f"[WARN] Could not patch Bottle routing: {e}")
+        return False
+

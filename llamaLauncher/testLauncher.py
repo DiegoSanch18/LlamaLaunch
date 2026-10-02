@@ -889,6 +889,48 @@ class TestBatchManagerModule(unittest.TestCase):
 
 
 
+class TestPywebviewBottlePatch(unittest.TestCase):
+    """Audits the Bottle routing patch that prevents HTTP 500 TypeError on root URL."""
+
+    def test_bottle_patch_serves_root_without_typeerror(self):
+        import bottle
+        from app.backend.config import patch_pywebview_bottle
+        patched = patch_pywebview_bottle()
+        self.assertTrue(patched)
+
+        app = bottle.Bottle()
+
+        @app.route('/')
+        @app.route('/<file:path>')
+        def asset(file):
+            return f"Served: {file}"
+
+        def dummy_sr(status, headers, exc_info=None):
+            pass
+
+        # Test route '/' — must NOT raise TypeError and must default to 'index.html'
+        environ_root = {
+            'REQUEST_METHOD': 'GET',
+            'PATH_INFO': '/',
+            'wsgi.input': None,
+            'SERVER_NAME': 'localhost',
+            'SERVER_PORT': '42001'
+        }
+        res_root = list(app(environ_root, dummy_sr))
+        self.assertEqual(res_root, [b"Served: index.html"])
+
+        # Test route '/style.css' — must serve specific asset
+        environ_file = {
+            'REQUEST_METHOD': 'GET',
+            'PATH_INFO': '/style.css',
+            'wsgi.input': None,
+            'SERVER_NAME': 'localhost',
+            'SERVER_PORT': '42001'
+        }
+        res_file = list(app(environ_file, dummy_sr))
+        self.assertEqual(res_file, [b"Served: style.css"])
+
+
 class TestRealEcosystemLiveVerification(unittest.TestCase):
     """Optional live hardware & filesystem sanity checks against G:\\My Drive\\AI Local."""
 
@@ -914,3 +956,4 @@ class TestRealEcosystemLiveVerification(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
