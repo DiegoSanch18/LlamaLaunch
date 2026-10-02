@@ -47,29 +47,14 @@
                             <p class="subtitle">Customize hardware offloads and performance</p>
                         </div>
 
+                        <!-- Unified Combobox: [Familia] — [Variante] -->
                         <div class="form-group">
-                            <label for="select-engine">Execution Engine</label>
-                            <select id="select-engine" onchange="onEngineOrPqChange()">
-                                <option value="CPU">CPU Only (Universal / Lightweight)</option>
-                                <option value="CUDA" id="opt-cuda">NVIDIA GPU CUDA (Hardware Accelerated)</option>
-                                <option value="VULKAN" id="opt-vulkan">VULKAN GPU (AMD / Intel / Generic)</option>
-                            </select>
-                        </div>
-
-                        <!-- 1. Category Selection added as requested -->
-                        <div class="form-group">
-                            <label for="select-category">Model Category</label>
-                            <select id="select-category" onchange="onCategoryChange()">
-                                <option value="edge">EDGE</option>
-                                <option value="large">LARGE</option>
-                                <option value="coder">CODER</option>
-                            </select>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="select-model">Local GGUF Model</label>
-                            <select id="select-model" onchange="onModelSelectChange()">
-                                <!-- Dynamic filtered options loaded here -->
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+                                <label for="select-model-combo">Model (Family — Variant)</label>
+                                <button type="button" class="btn-icon-only" onclick="reloadModelDropdown()" title="Recargar modelos" style="font-size: 13px; color: var(--accent-blue);">🔄</button>
+                            </div>
+                            <select id="select-model-combo" onchange="onBatchModelChange()">
+                                <!-- Dynamic options loaded here -->
                             </select>
                         </div>
 
@@ -80,21 +65,38 @@
                             </div>
                         </div>
 
+                        <div class="form-group">
+                            <label for="select-engine">Execution Engine / Binary</label>
+                            <select id="select-engine" onchange="onEngineOrPqChange()">
+                                <option value="CUDA" id="opt-cuda">NVIDIA GPU CUDA (Hardware Accelerated)</option>
+                                <option value="VULKAN" id="opt-vulkan">VULKAN GPU (AMD / Intel / Generic)</option>
+                                <option value="CPU">CPU Only (Universal / Lightweight)</option>
+                            </select>
+                            <div class="binary-badge-container" id="binary-badge-container" style="margin-top: 6px;">
+                                <span class="binary-status-badge" id="lbl-binary-badge">Detecting engine...</span>
+                            </div>
+                        </div>
+
+                        <div class="form-group" id="mmproj-group">
+                            <label for="input-mmproj">Vision Projector (mmproj)</label>
+                            <input type="text" id="input-mmproj" placeholder="None (Text LLM)" readonly style="font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary);">
+                        </div>
+
                         <div class="form-row">
                             <div class="form-group">
                                 <label for="input-threads">CPU Threads</label>
-                                <input type="number" id="input-threads" min="1" value="4">
+                                <input type="number" id="input-threads" min="1" value="8">
                             </div>
                             <div class="form-group">
                                 <label for="input-ngl">GPU Layers (ngl)</label>
-                                <input type="number" id="input-ngl" min="0" max="999" value="0">
+                                <input type="number" id="input-ngl" min="0" max="999" value="99">
                             </div>
                         </div>
 
                         <div class="form-row">
                             <div class="form-group">
                                 <label for="input-context">Context Size (Tokens)</label>
-                                <input type="number" id="input-context" min="8192" max="131072" step="512" value="8192">
+                                <input type="number" id="input-context" min="512" max="262144" step="512" value="8192">
                             </div>
                             <div class="form-group">
                                 <label for="input-port">Local Port</label>
@@ -102,7 +104,13 @@
                             </div>
                         </div>
 
-                        <!-- 2. PolarQuant interactive checkbox -->
+                        <!-- Flash Attention checkbox -->
+                        <div class="form-group checkbox-group">
+                            <input type="checkbox" id="check-flash-attn" checked>
+                            <label for="check-flash-attn">Enable Flash Attention (--flash-attn on)</label>
+                        </div>
+
+                        <!-- PolarQuant interactive checkbox -->
                         <div class="form-group checkbox-group">
                             <input type="checkbox" id="check-pq-enable" onchange="onPqCheckboxChange()">
                             <label for="check-pq-enable">Enable KV Cache Compression (PolarQuant)</label>
@@ -113,7 +121,7 @@
                             <label for="select-pq-mode">Compression Level</label>
                             <select id="select-pq-mode" onchange="onEngineOrPqChange()">
                                 <option value="4">Ultra Performance Mode (3-bit q3_K)</option>
-                                <option value="1">Performance Mode (4-bit q4_0)</option>
+                                <option value="1" selected>Performance Mode (4-bit q4_0)</option>
                                 <option value="5">Balanced Mode (5-bit q5_0)</option>
                                 <option value="6">High Quality Mode (6-bit q6_K)</option>
                                 <option value="2">Max Quality Mode (8-bit q8_0)</option>
@@ -123,6 +131,51 @@
                         <div class="form-group checkbox-group">
                             <input type="checkbox" id="check-shift" checked>
                             <label for="check-shift">Enable Context Shifting (Avoid OOM Crashes)</label>
+                        </div>
+
+                        <!-- Sampling Parameters -->
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="input-temp">Temp (Sampling)</label>
+                                <input type="number" id="input-temp" min="0.0" max="2.0" step="0.05" value="0.7">
+                            </div>
+                            <div class="form-group">
+                                <label for="input-topp">Top-P</label>
+                                <input type="number" id="input-topp" min="0.0" max="1.0" step="0.01" value="0.95">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="input-topk">Top-K</label>
+                                <input type="number" id="input-topk" min="0" max="200" step="1" value="40">
+                            </div>
+                            <div class="form-group">
+                                <label for="input-minp">Min-P</label>
+                                <input type="number" id="input-minp" min="0.0" max="1.0" step="0.01" value="0.05">
+                            </div>
+                        </div>
+
+                        <!-- Batch Script Raw Editor Toggle -->
+                        <div class="bat-editor-toggle-row">
+                            <button type="button" class="btn-secondary bat-toggle-btn" id="btn-toggle-bat" onclick="toggleBatEditor()">
+                                <span>📝 Ver / Editar Script .BAT</span>
+                                <span id="bat-editor-chevron">▼</span>
+                            </button>
+                        </div>
+
+                        <!-- Raw Batch Script Editor Area -->
+                        <div id="bat-editor-container" class="bat-editor-container" style="display: none;">
+                            <div class="bat-editor-header">
+                                <span class="info-label" id="lbl-bat-filename">script.bat</span>
+                                <span class="bat-backup-pill" id="lbl-bat-backup-status">Auto-backup .bat.bak</span>
+                            </div>
+                            <textarea id="editor-bat-content" class="bat-textarea" rows="11" spellcheck="false" placeholder="Cargando script .bat..."></textarea>
+                            <div class="bat-editor-actions">
+                                <span id="lbl-bat-save-result" class="bat-save-msg"></span>
+                                <button type="button" class="btn-secondary btn-save-bat" id="btn-save-bat" onclick="saveBatScript()">
+                                    💾 Guardar .BAT
+                                </button>
+                            </div>
                         </div>
 
                         <div class="action-zone">

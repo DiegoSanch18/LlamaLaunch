@@ -211,7 +211,7 @@ body {
 /* Control Layout Split */
 .control-layout {
     display: grid;
-    grid-template-columns: 380px 1fr;
+    grid-template-columns: 420px 1fr;
     gap: 24px;
     flex: 1;
     min-height: 0;
@@ -305,6 +305,148 @@ select option {
     font-weight: 500;
     cursor: pointer;
     font-size: 13px;
+}
+
+/* Binary Status Badges */
+.binary-badge-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.binary-status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    font-family: var(--font-mono);
+    background-color: rgba(56, 189, 248, 0.1);
+    border: 1px solid var(--border-color);
+    color: var(--accent-blue);
+    transition: var(--transition);
+}
+
+.binary-status-badge.dedicated {
+    background-color: rgba(16, 185, 129, 0.15);
+    border-color: rgba(16, 185, 129, 0.4);
+    color: var(--accent-emerald);
+    box-shadow: 0 0 10px var(--accent-emerald-glow);
+}
+
+.binary-status-badge.generic {
+    background-color: rgba(56, 189, 248, 0.12);
+    border-color: rgba(56, 189, 248, 0.35);
+    color: var(--accent-blue);
+}
+
+/* Batch Script Editor Component */
+.bat-editor-toggle-row {
+    margin-top: 4px;
+}
+
+.bat-toggle-btn {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 9px 14px;
+    background-color: rgba(255, 255, 255, 0.03);
+    border: 1px dashed var(--border-color);
+    color: var(--text-primary);
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: var(--transition);
+}
+
+.bat-toggle-btn:hover {
+    border-color: var(--accent-blue);
+    background-color: rgba(56, 189, 248, 0.06);
+    color: var(--accent-blue);
+}
+
+.bat-editor-container {
+    background-color: #030712;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    animation: fadeIn 0.2s ease-in-out;
+}
+
+.bat-editor-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.bat-backup-pill {
+    font-size: 10px;
+    font-family: var(--font-mono);
+    padding: 2px 8px;
+    border-radius: 10px;
+    background-color: rgba(251, 191, 36, 0.12);
+    border: 1px solid rgba(251, 191, 36, 0.3);
+    color: var(--accent-amber);
+}
+
+.bat-textarea {
+    width: 100%;
+    background-color: #0b0f19;
+    color: #e2e8f0;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 10px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.5;
+    resize: vertical;
+    min-height: 160px;
+    box-sizing: border-box;
+    outline: none;
+    transition: var(--transition);
+}
+
+.bat-textarea:focus {
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 0 2px var(--accent-blue-glow);
+}
+
+.bat-editor-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+}
+
+.bat-save-msg {
+    font-size: 11px;
+    font-family: var(--font-sans);
+    color: var(--text-secondary);
+}
+
+.btn-save-bat {
+    background-color: rgba(56, 189, 248, 0.15);
+    border-color: var(--accent-blue);
+    color: var(--accent-blue);
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.btn-save-bat:hover {
+    background-color: var(--accent-blue);
+    color: #0f172a;
+    box-shadow: 0 0 12px var(--accent-blue-glow);
 }
 
 /* Action Zone Buttons */

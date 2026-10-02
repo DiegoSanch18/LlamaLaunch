@@ -67,6 +67,17 @@ except ImportError:
         ApiBridge = None
         HAS_API_BRIDGE = False
 
+try:
+    import app.backend.batch_manager as batch_manager
+    HAS_BATCH_MANAGER = True
+except ImportError:
+    try:
+        import llamaLauncher.app.backend.batch_manager as batch_manager
+        HAS_BATCH_MANAGER = True
+    except ImportError:
+        batch_manager = None
+        HAS_BATCH_MANAGER = False
+
 
 class TestHardwareModule(unittest.TestCase):
     """Audits the hardware scanner module."""
@@ -632,6 +643,250 @@ class TestBinaryResolverModule(unittest.TestCase):
             
         self.assertFalse(res["success"])
         self.assertIn("error", res)
+
+
+class TestBatchManagerModule(unittest.TestCase):
+    """Audits batch script parsing, generation, and safe persistence with backups."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp(prefix="llama_batch_test_")
+        self.root = Path(self.temp_dir)
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_parse_batch_script_complete(self):
+        """Verifies parsing of all inference flags, sampling, and paths from a .bat script."""
+        bat_file = self.root / "run-test.bat"
+        content = (
+            "@echo off\r\n"
+            "setlocal enabledelayedexpansion\r\n"
+            'set "BASEDIR=%~dp0"\r\n'
+            'set "MODEL=%BASEDIR%Qwen2.5-Coder-14B-Instruct-IQ4_XS.gguf"\r\n'
+            'set "MMPROJ=%BASEDIR%mmproj-test.gguf"\r\n'
+            'llama-server.exe --model "%MODEL%" --mmproj "%MMPROJ%" '
+            '--n-gpu-layers 99 --flash-attn on --ctx-size 16384 --ubatch-size 512 '
+            '--cache-type-k q4_0 --cache-type-v q4_0 --threads 8 --temp 0.7 '
+            '--top-p 0.95 --min-p 0.05 --top-k 40 --host 0.0.0.0 --port 8085 --alias qwen-coder\r\n'
+        )
+        bat_file.write_text(content, encoding="utf-8")
+
+        parsed = batch_manager.parse_batch_script(bat_file)
+        self.assertTrue(parsed["success"])
+        self.assertEqual(parsed["port"], 8085)
+        self.assertEqual(parsed["context"], 16384)
+        self.assertEqual(parsed["threads"], 8)
+        self.assertEqual(parsed["ngl"], 99)
+        self.assertTrue(parsed["flash_attn"])
+        self.assertEqual(parsed["cache_type_k"], "q4_0")
+        self.assertEqual(parsed["cache_type_v"], "q4_0")
+        self.assertEqual(parsed["temp"], 0.7)
+        self.assertEqual(parsed["top_p"], 0.95)
+        self.assertEqual(parsed["top_k"], 40)
+        self.assertEqual(parsed["min_p"], 0.05)
+        self.assertEqual(parsed["model_file"], "Qwen2.5-Coder-14B-Instruct-IQ4_XS.gguf")
+        self.assertEqual(parsed["mmproj_file"], "mmproj-test.gguf")
+        self.assertEqual(parsed["alias"], "qwen-coder")
+        self.assertFalse(parsed["has_backup"])
+
+    def test_parse_batch_script_alternative_short_flags(self):
+        """Verifies parsing short flags (-c, -ngl, -t, --flash-attn off)."""
+        bat_file = self.root / "run-short.bat"
+        content = (
+            "@echo off\r\n"
+            "llama-server.exe -m model.gguf -c 4096 -ngl 45 -t 6 --flash-attn off\r\n"
+        )
+        bat_file.write_text(content, encoding="utf-8")
+
+        parsed = batch_manager.parse_batch_script(bat_file)
+        self.assertTrue(parsed["success"])
+        self.assertEqual(parsed["context"], 4096)
+        self.assertEqual(parsed["ngl"], 45)
+        self.assertEqual(parsed["threads"], 6)
+        self.assertFalse(parsed["flash_attn"])
+
+    def test_parse_batch_script_missing_file(self):
+        """Verifies error handling when batch file does not exist."""
+        non_existent = self.root / "missing.bat"
+        parsed = batch_manager.parse_batch_script(non_existent)
+        self.assertFalse(parsed["success"])
+        self.assertIn("error", parsed)
+
+    def test_generate_batch_template_with_mmproj(self):
+        """Verifies template generation with vision projector and dynamic paths."""
+        folder = self.root / "Gemma 4" / "12B"
+        template = batch_manager.generate_batch_template(
+            model_folder=folder,
+            model_filename="gemma-4-12b.gguf",
+            mmproj_filename="mmproj-gemma.gguf",
+            family_name="Gemma 4",
+            variant_name="12B"
+        )
+
+        self.assertIn("%~dp0", template)
+        self.assertIn('set "MODEL=%BASEDIR%gemma-4-12b.gguf"', template)
+        self.assertIn("mmproj-gemma.gguf", template)
+        self.assertIn("!MMPROJ_FLAG!", template)
+        self.assertIn("--n-gpu-layers  99", template)
+        self.assertIn("--flash-attn    on", template)
+        self.assertIn("--ctx-size      16384", template)
+        self.assertIn("--cache-type-k  q4_0", template)
+
+    def test_generate_batch_template_without_mmproj(self):
+        """Verifies template generation when no vision projector is provided."""
+        folder = self.root / "Qwen 2.5" / "Coder"
+        template = batch_manager.generate_batch_template(
+            model_folder=folder,
+            model_filename="qwen-coder.gguf",
+            mmproj_filename=None,
+            family_name="Qwen 2.5",
+            variant_name="Coder"
+        )
+
+        self.assertIn("qwen-coder.gguf", template)
+        self.assertIn('set "MMPROJ_FLAG="', template)
+        self.assertNotIn("None", template)
+
+    def test_save_batch_script_with_backup_and_crlf(self):
+        """Verifies saving batch script creates .bat.bak and writes CRLF line endings."""
+        bat_file = self.root / "run-save-test.bat"
+        initial_content = "@echo off\r\necho Initial script\r\n"
+        bat_file.write_text(initial_content, encoding="utf-8")
+
+        new_content = "@echo off\necho Updated script\npause\n"
+        res = batch_manager.save_batch_script(bat_file, new_content, create_backup=True)
+
+        self.assertTrue(res["success"])
+        self.assertTrue(res["backup_created"])
+        self.assertTrue(Path(res["backup_path"]).exists())
+
+        # Verify backup contains initial content
+        backup_content = Path(res["backup_path"]).read_text(encoding="utf-8")
+        self.assertIn("Initial script", backup_content)
+
+        # Verify updated file was written with Windows CRLF endings
+        raw_bytes = bat_file.read_bytes()
+        self.assertIn(b"\r\n", raw_bytes)
+        self.assertIn("Updated script", bat_file.read_text(encoding="utf-8"))
+
+    def test_save_batch_script_new_file_no_backup(self):
+        """Verifies creating a new script without existing file does not create unnecessary backup."""
+        bat_file = self.root / "new-script.bat"
+        res = batch_manager.save_batch_script(bat_file, "@echo off\necho Brand new\n", create_backup=True)
+
+        self.assertTrue(res["success"])
+        self.assertFalse(res["backup_created"])
+        self.assertIsNone(res["backup_path"])
+        self.assertTrue(bat_file.exists())
+
+    def test_api_bridge_batch_operations(self):
+        """Verifies ApiBridge endpoints for scanning and batch detail retrieval."""
+        if not HAS_API_BRIDGE:
+            self.skipTest("ApiBridge not imported.")
+
+        # Create mock models structure
+        models_dir = self.root / "models"
+        family_dir = models_dir / "TestFamily" / "Variant"
+        family_dir.mkdir(parents=True)
+        (family_dir / "test-model.gguf").write_bytes(b"GGUF" + b"\x00" * 100)
+
+        # Create mock bin dir
+        bin_dir = self.root / "bin" / "llama-b9297-bin-win-cuda-x64"
+        bin_dir.mkdir(parents=True)
+        (bin_dir / "llama-server.exe").write_bytes(b"MZ" + b"\x00" * 50)
+
+        bridge = ApiBridge(project_root=self.root)
+        bridge.models_dir = models_dir
+        bridge.bin_root = self.root / "bin"
+
+        scan_res = bridge.scan_models_and_batches()
+        self.assertTrue(scan_res["success"])
+        self.assertGreaterEqual(scan_res["total_models"], 1)
+
+        model_id = scan_res["models"][0]["id"]
+        details = bridge.get_model_batch_details(model_id)
+        self.assertTrue(details["success"])
+        self.assertTrue(details["is_newly_generated"])
+        self.assertTrue(Path(details["path"]).exists())
+
+        # Test saving batch script via ApiBridge
+        save_res = bridge.save_batch_script(details["path"], details["raw_content"] + "\r\n:: appended", create_backup=True)
+        self.assertTrue(save_res["success"])
+        self.assertTrue(save_res["backup_created"])
+        self.assertIn("parsed_config", save_res)
+        self.assertTrue(save_res["parsed_config"]["success"])
+
+    def test_update_batch_script_content_all_flags(self):
+        """Verifies programmatic updating of all inference and sampling flags in a .bat script."""
+        initial_content = (
+            "@echo off\r\n"
+            'set "BASEDIR=%~dp0"\r\n'
+            'set "MODEL=%BASEDIR%model.gguf"\r\n'
+            'llama-server.exe --model "%MODEL%" '
+            '--n-gpu-layers 33 --flash-attn off --ctx-size 4096 '
+            '--cache-type-k f16 --cache-type-v f16 --threads 4 --temp 0.5 '
+            '--top-p 0.9 --min-p 0.1 --top-k 20 --port 8080\r\n'
+        )
+        bat_file = self.root / "run-update.bat"
+        bat_file.write_text(initial_content, encoding="utf-8")
+
+        updates = {
+            "port": 8088,
+            "context": 32768,
+            "threads": 12,
+            "ngl": 99,
+            "flash_attn": True,
+            "cache_type_k": "q4_0",
+            "cache_type_v": "q4_0",
+            "temp": 0.85,
+            "top_p": 0.98,
+            "top_k": 50,
+            "min_p": 0.02
+        }
+
+        updated_content = batch_manager.update_batch_script_content(initial_content, updates)
+        batch_manager.save_batch_script(bat_file, updated_content, create_backup=False)
+
+        parsed = batch_manager.parse_batch_script(bat_file)
+        self.assertTrue(parsed["success"])
+        self.assertEqual(parsed["port"], 8088)
+        self.assertEqual(parsed["context"], 32768)
+        self.assertEqual(parsed["threads"], 12)
+        self.assertEqual(parsed["ngl"], 99)
+        self.assertTrue(parsed["flash_attn"])
+        self.assertEqual(parsed["cache_type_k"], "q4_0")
+        self.assertEqual(parsed["cache_type_v"], "q4_0")
+        self.assertEqual(parsed["temp"], 0.85)
+        self.assertEqual(parsed["top_p"], 0.98)
+        self.assertEqual(parsed["top_k"], 50)
+        self.assertEqual(parsed["min_p"], 0.02)
+
+    def test_update_batch_script_content_missing_flags_insertion(self):
+        """Verifies inserting flags like --threads when initially missing from the script."""
+        initial_content = (
+            "@echo off\r\n"
+            'llama-server.exe --model "m.gguf" --ctx-size 8192 --n-gpu-layers 50 --port 8080\r\n'
+        )
+        updates = {"threads": 8, "ngl": 99}
+        updated = batch_manager.update_batch_script_content(initial_content, updates)
+
+        self.assertIn("--threads", updated)
+        self.assertIn("8", updated)
+        self.assertIn("--n-gpu-layers  99", updated)
+
+    def test_batch_template_deep_relative_paths(self):
+        """Verifies template generation includes multi-level relative path resolution."""
+        folder = self.root / "Family" / "Sub" / "Deep" / "Variant"
+        template = batch_manager.generate_batch_template(
+            model_folder=folder,
+            model_filename="deep-model.gguf",
+            family_name="DeepFamily",
+            variant_name="DeepVariant"
+        )
+
+        self.assertIn("..\\..\\..\\..\\llamaLauncher", template)
+        self.assertIn("..\\Bonsai 2\\llama.cpp", template)
+
 
 
 class TestRealEcosystemLiveVerification(unittest.TestCase):

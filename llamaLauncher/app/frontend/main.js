@@ -68,10 +68,14 @@ async function initApp() {
         appendLogLine(`[WARNING] Hardware detection encountered an issue: ${e}. Using defaults.`, "error");
     }
 
-    // B. Scan and store local models (then trigger initial category rendering)
+    // B. Scan and store local models for both views
     try {
         scannedModelsMap = await api.scan_models();
-        if (typeof onCategoryChange === 'function') onCategoryChange();
+        if (typeof loadBatchModels === 'function') {
+            await loadBatchModels();
+        } else if (typeof onCategoryChange === 'function') {
+            onCategoryChange();
+        }
     } catch (e) {
         appendLogLine(`[WARNING] Model scan failed: ${e}`, "error");
     }
@@ -122,6 +126,9 @@ function appendLogLine(text, type = "system") {
     div.className = `console-line ${type}`;
     div.innerText = `[${new Date().toLocaleTimeString()}] ${text}`;
     terminal.appendChild(div);
+    while (terminal.childElementCount > 120) {
+        terminal.removeChild(terminal.firstElementChild);
+    }
     if (terminalScrolledToBottom) {
         terminal.scrollTop = terminal.scrollHeight;
     }

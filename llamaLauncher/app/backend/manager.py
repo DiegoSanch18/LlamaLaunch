@@ -41,6 +41,16 @@ class ProcessManager:
         self.status = "STOPPED"
         try:
             if sys.platform == "win32":
+                if self.process:
+                    try:
+                        subprocess.run(
+                            f"taskkill /f /t /pid {self.process.pid}",
+                            shell=True,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL
+                        )
+                    except Exception:
+                        pass
                 subprocess.run(
                     "taskkill /f /im llama-server.exe", 
                     shell=True, 
@@ -222,6 +232,7 @@ class ProcessManager:
                 self.process = subprocess.Popen(
                     cmd,
                     cwd=str(bat_path.parent),
+                    stdin=subprocess.DEVNULL,
                     stdout=log_file,
                     stderr=log_file,
                     creationflags=creation_flags

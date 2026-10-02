@@ -33,6 +33,7 @@ __pycache__/
 *.local
 config.json
 
-# Archivos temporales del sistema operativo
+# Archivos temporales del sistema operativo y agentes
 .DS_Store
 Thumbs.db
+.agents/

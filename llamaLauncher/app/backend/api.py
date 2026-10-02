@@ -288,9 +288,13 @@ class ApiBridge:
     def save_batch_script(self, bat_path: str, raw_content: str, create_backup: bool = True) -> Dict[str, Any]:
         """
         Saves updated content to a .bat script with automatic .bat.bak backup.
+        Also re-parses the configuration so the caller receives the updated settings.
         """
         try:
-            return batch_manager.save_batch_script(Path(bat_path), raw_content, create_backup=create_backup)
+            res = batch_manager.save_batch_script(Path(bat_path), raw_content, create_backup=create_backup)
+            if res.get("success"):
+                res["parsed_config"] = batch_manager.parse_batch_script(Path(bat_path))
+            return res
         except Exception as e:
             return {"success": False, "error": f"Error saving batch script: {str(e)}"}
 
@@ -415,7 +419,7 @@ class ApiBridge:
         Polls server status and reads last active logs.
         """
         info = self.manager.get_status_info()
-        info["logs"] = self.manager.get_recent_logs(25)
+        info["logs"] = self.manager.get_recent_logs(120)
         return info
 
     def set_window(self, window):

@@ -33,10 +33,17 @@ def get_resource_path(relative_path: str) -> Path:
 # Resolve project root early
 PROJECT_ROOT = resolve_project_root()
 
-# Add project root to sys.path for package imports
-sys.path.insert(0, str(PROJECT_ROOT))
+# Add project root and script directory to sys.path for package imports
+launcher_dir = Path(__file__).resolve().parent
+if str(launcher_dir) not in sys.path:
+    sys.path.insert(0, str(launcher_dir))
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.backend.api import ApiBridge
+try:
+    from llamaLauncher.app.backend.api import ApiBridge
+except ImportError:
+    from app.backend.api import ApiBridge
 
 def main():
     """
