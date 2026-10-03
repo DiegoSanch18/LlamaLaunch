@@ -66,7 +66,12 @@
                         </div>
 
                         <div class="form-group">
-                            <label for="select-engine">Execution Engine / Binary</label>
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                                <label for="select-engine" style="margin-bottom: 0;">Execution Engine / Binary</label>
+                                <button type="button" class="btn-check-updates" id="btn-check-llama-updates" onclick="checkLlamaUpdates()" title="Buscar actualizaciones de llama.cpp en GitHub">
+                                    <span id="spinner-update-llama" style="display: none; margin-right: 4px;">⏳</span>🔄 Actualizar
+                                </button>
+                            </div>
                             <select id="select-engine" onchange="onEngineOrPqChange()">
                                 <option value="CUDA" id="opt-cuda">NVIDIA GPU CUDA (Hardware Accelerated)</option>
                                 <option value="VULKAN" id="opt-vulkan">VULKAN GPU (AMD / Intel / Generic)</option>
@@ -129,11 +134,10 @@
                             style="display: none; padding-left: 20px; transition: var(--transition);">
                             <label for="select-pq-mode">Compression Level</label>
                             <select id="select-pq-mode" onchange="onEngineOrPqChange()">
-                                <option value="4">Ultra Performance Mode (3-bit q3_K)</option>
-                                <option value="1" selected>Performance Mode (4-bit q4_0)</option>
-                                <option value="5">Balanced Mode (5-bit q5_0)</option>
-                                <option value="6">High Quality Mode (6-bit q6_K)</option>
-                                <option value="2">Max Quality Mode (8-bit q8_0)</option>
+                                <option value="q8_0">Calidad (8-bit q8_0)</option>
+                                <option value="q5_0">Equilibrado (5-bit q5_0)</option>
+                                <option value="iq4_nl" selected>Rendimiento (4-bit iq4_nl)</option>
+                                <option value="q4_0">Ultra Rendimiento (4-bit q4_0)</option>
                             </select>
                         </div>
 
@@ -369,6 +373,61 @@
             </section>
 
         </main>
+    <!-- Modal: Actualización de llama.cpp -->
+    <div class="modal-overlay" id="modal-llama-update">
+        <div class="modal-container">
+            <div class="modal-header">
+                <h3>🚀 Actualización de llama.cpp</h3>
+                <button type="button" class="modal-close-btn" onclick="closeLlamaUpdateModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="update-version-card" style="display: flex; justify-content: space-between; align-items: center; background: rgba(15, 23, 42, 0.6); padding: 12px 16px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div>
+                        <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Instalada</div>
+                        <div id="lbl-update-current" style="font-size: 15px; font-weight: 700; color: var(--text-secondary); font-family: var(--font-mono);">--</div>
+                    </div>
+                    <div style="font-size: 20px; color: var(--accent-blue);">➔</div>
+                    <div>
+                        <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Disponible</div>
+                        <div id="lbl-update-latest" style="font-size: 15px; font-weight: 700; color: var(--accent-emerald); font-family: var(--font-mono);">--</div>
+                    </div>
+                </div>
+
+                <div style="font-size: 12px; color: var(--text-secondary);">
+                    <strong>Paquete para Windows:</strong>
+                    <div id="lbl-update-asset" style="font-family: var(--font-mono); color: var(--text-primary); margin-top: 2px; word-break: break-all;">--</div>
+                </div>
+
+                <div>
+                    <label style="font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">Notas de la versión</label>
+                    <div id="lbl-update-notes" style="font-size: 11px; color: var(--text-secondary); background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px; max-height: 120px; overflow-y: auto; white-space: pre-wrap; font-family: var(--font-mono); margin-top: 4px;"></div>
+                </div>
+
+                <!-- Progress container -->
+                <div id="update-progress-container" style="display: none; flex-direction: column; gap: 6px; margin-top: 4px;">
+                    <div style="display: flex; justify-content: space-between; font-size: 12px;">
+                        <span id="lbl-update-status" style="color: var(--accent-blue); font-weight: 600;">Descargando...</span>
+                        <span id="lbl-update-pct" style="font-family: var(--font-mono); color: var(--text-primary);">0%</span>
+                    </div>
+                    <div class="progress-bar-bg" style="width: 100%; height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden;">
+                        <div id="bar-update-progress" style="width: 0%; height: 100%; background: linear-gradient(90deg, var(--accent-blue), var(--accent-emerald)); transition: width 0.2s ease;"></div>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);">
+                        <span id="lbl-update-metrics">0.0 / 0.0 MB</span>
+                        <span id="lbl-update-speed">0.00 MB/s</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <a id="btn-update-github-link" href="#" target="_blank" class="btn-secondary" style="text-decoration: none; display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; font-size: 12px;">
+                    🌐 Ver en GitHub
+                </a>
+                <button type="button" class="btn-secondary" onclick="closeLlamaUpdateModal()" style="padding: 8px 14px; font-size: 12px;">Cerrar</button>
+                <button type="button" class="btn-primary start" id="btn-start-update-install" onclick="startLlamaUpdateDownload()" style="width: auto; padding: 8px 18px; font-size: 13px;">
+                    ⬇️ Descargar e Instalar
+                </button>
+            </div>
+        </div>
     </div>
 
     <!-- Script imports with cache busting -->

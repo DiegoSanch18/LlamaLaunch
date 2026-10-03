@@ -594,3 +594,195 @@ class ApiBridge:
             return {"success": True}
         except Exception as e:
             return {"success": False, "message": str(e)}
+
+    def check_llama_updates(self, engine: str = "CUDA") -> Dict[str, Any]:
+        """
+        Queries GitHub API for the latest pre-release/release of llama.cpp,
+        extracts the latest build number, compares it against the local build,
+        and locates the corresponding Windows x64 binary asset.
+        """
+        import requests
+        try:
+            # Detect currently active/installed build for the selected engine
+            resolved = binaries.resolve_model_binary(bin_root=self.bin_root, dev_type=engine)
+            current_build_num = resolved.get("build_num", 0)
+            current_build = resolved.get("build", "unknown")
+            if current_build == "unknown" and current_build_num:
+                current_build = f"b{current_build_num}"
+
+            # Query GitHub Releases (per_page=10 to include latest pre-releases like b11368)
+            headers = {"User-Agent": "LlamaLaunch-Desktop/2.1"}
+            resp = requests.get(
+                "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=10",
+                headers=headers,
+                timeout=10
+            )
+            resp.raise_for_status()
+            releases_data = resp.json()
+
+            target_release = None
+            latest_build_num = 0
+            latest_tag = ""
+            for rel in releases_data:
+                tag = rel.get("tag_name", "")
+                m = re.match(r"^b(\d+)$", tag, re.IGNORECASE)
+                if m:
+                    b_num = int(m.group(1))
+                    if b_num > latest_build_num:
+                        latest_build_num = b_num
+                        latest_tag = tag
+                        target_release = rel
+                        break
+
+            if not target_release:
+                return {
+                    "success": False,
+                    "message": "No se encontraron releases con formato de compilación bXXXX en GitHub."
+                }
+
+            engine_upper = (engine or "CUDA").upper()
+            assets = target_release.get("assets", [])
+            chosen_asset = None
+
+            if engine_upper == "CUDA":
+                cuda13_assets = [a for a in assets if "bin-win-cuda-13" in a["name"].lower() and "x64.zip" in a["name"].lower() and "arm64" not in a["name"].lower()]
+                cuda_assets = [a for a in assets if "bin-win-cuda" in a["name"].lower() and "x64.zip" in a["name"].lower() and "arm64" not in a["name"].lower()]
+                if cuda13_assets:
+                    chosen_asset = cuda13_assets[0]
+                elif cuda_assets:
+                    chosen_asset = cuda_assets[0]
+            elif engine_upper == "VULKAN":
+                vulkan_assets = [a for a in assets if "bin-win-vulkan" in a["name"].lower() and "x64.zip" in a["name"].lower() and "arm64" not in a["name"].lower()]
+                if vulkan_assets:
+                    chosen_asset = vulkan_assets[0]
+            else:
+                cpu_assets = [a for a in assets if "bin-win-cpu" in a["name"].lower() and "x64.zip" in a["name"].lower() and "arm64" not in a["name"].lower()]
+                if cpu_assets:
+                    chosen_asset = cpu_assets[0]
+
+            has_update = latest_build_num > current_build_num
+
+            body = target_release.get("body", "").strip()
+            if len(body) > 600:
+                body = body[:600] + "..."
+
+            return {
+                "success": True,
+                "has_update": has_update,
+                "current_version": current_build,
+                "current_build_num": current_build_num,
+                "latest_version": latest_tag,
+                "latest_build_num": latest_build_num,
+                "release_name": target_release.get("name") or latest_tag,
+                "release_notes": body,
+                "html_url": target_release.get("html_url", "https://github.com/ggml-org/llama.cpp/releases"),
+                "published_at": target_release.get("published_at", ""),
+                "asset_name": chosen_asset.get("name") if chosen_asset else None,
+                "download_url": chosen_asset.get("browser_download_url") if chosen_asset else None,
+                "size_mb": round(chosen_asset.get("size", 0) / (1024 * 1024), 1) if chosen_asset else 0,
+                "engine": engine_upper
+            }
+        except Exception as e:
+            return {"success": False, "message": f"Error al verificar actualizaciones en GitHub: {str(e)}"}
+
+    def download_and_install_llama_update(self, download_url: str, asset_name: str, engine: str) -> Dict[str, Any]:
+        """
+        Streams download of the llama.cpp release zip in a background thread,
+        extracts it into the bin directory, copies CUDA runtime DLLs if needed,
+        and notifies the frontend via evaluate_js.
+        """
+        if not download_url:
+            return {"success": False, "message": "URL de descarga inválida."}
+
+        thread = threading.Thread(
+            target=self._worker_install_llama_update,
+            args=(download_url, asset_name, engine),
+            daemon=True
+        )
+        thread.start()
+        return {"success": True, "message": "Iniciando descarga e instalación en segundo plano."}
+
+    def _worker_install_llama_update(self, download_url: str, asset_name: str, engine: str):
+        import requests
+        import zipfile
+        import time
+
+        temp_dir = self.logs_dir / "temp_updates"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        zip_path = temp_dir / (asset_name or "llama_update.zip")
+
+        start_time = time.time()
+        last_update_time = 0
+
+        def emit_js(percent, speed, downloaded_mb, total_mb, status, message=""):
+            if self._window:
+                msg_escaped = message.replace("'", "\\'").replace('"', '\\"')
+                js_call = f"window.updateLlamaUpdateProgress({percent:.1f}, {speed:.2f}, {downloaded_mb:.1f}, {total_mb:.1f}, '{status}', '{msg_escaped}')"
+                try:
+                    self._window.evaluate_js(js_call)
+                except Exception:
+                    pass
+
+        try:
+            emit_js(0.0, 0.0, 0.0, 0.0, 'downloading', 'Iniciando conexión con GitHub...')
+            headers = {'User-Agent': 'LlamaLaunch-Desktop/2.1'}
+            response = requests.get(download_url, stream=True, headers=headers, timeout=30)
+            response.raise_for_status()
+
+            total_size = int(response.headers.get('content-length', 0))
+            downloaded = 0
+            chunk_size = 1024 * 512
+
+            with open(zip_path, "wb") as f:
+                for chunk in response.iter_content(chunk_size=chunk_size):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+
+                        curr_time = time.time()
+                        if curr_time - last_update_time >= 0.2:
+                            last_update_time = curr_time
+                            duration = curr_time - start_time
+                            speed = (downloaded / (1024 * 1024 * duration)) if duration > 0 else 0
+                            percent = (downloaded / total_size * 100) if total_size > 0 else 0
+                            d_mb = downloaded / (1024 * 1024)
+                            t_mb = total_size / (1024 * 1024)
+                            emit_js(percent, speed, d_mb, t_mb, 'downloading')
+
+            total_mb = total_size / (1024 * 1024)
+            emit_js(100.0, 0.0, total_mb, total_mb, 'extracting', 'Extrayendo binarios y configurando DLLs...')
+
+            m_tag = re.search(r"b(\d+)", asset_name, re.IGNORECASE)
+            build_tag = f"b{m_tag.group(1)}" if m_tag else "latest"
+            engine_str = (engine or "cuda").lower()
+            target_folder_name = f"llama-{build_tag}-bin-win-{engine_str}-x64"
+
+            dest_dirs = [self.bin_root / target_folder_name]
+            local_bin_root = self.project_root / "llamaLauncher" / "bin" / "llama.cpp"
+            if local_bin_root.resolve() != self.bin_root.resolve():
+                dest_dirs.append(local_bin_root / target_folder_name)
+
+            for dest_dir in dest_dirs:
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                with zipfile.ZipFile(zip_path, 'r') as zf:
+                    zf.extractall(dest_dir)
+
+                if engine_str == "cuda":
+                    hardware.check_and_copy_cuda_dlls(dest_dir, self.bin_root)
+                    if local_bin_root.exists() and local_bin_root != self.bin_root:
+                        hardware.check_and_copy_cuda_dlls(dest_dir, local_bin_root)
+
+            try:
+                zip_path.unlink()
+            except Exception:
+                pass
+
+            emit_js(100.0, 0.0, total_mb, total_mb, 'completed', f'¡Actualización {build_tag} instalada exitosamente!')
+
+        except Exception as e:
+            if zip_path.exists():
+                try:
+                    zip_path.unlink()
+                except Exception:
+                    pass
+            emit_js(0.0, 0.0, 0.0, 0.0, 'error', f'Fallo en la instalación: {str(e)}')

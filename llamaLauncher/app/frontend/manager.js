@@ -154,18 +154,16 @@ async function onBatchModelChange() {
                     modeGroup.style.display = "flex";
 
                     const ck = details.cache_type_k.toLowerCase();
-                    if (ck.includes("q3_k")) {
-                        selectPq.value = "4";
+                    if (ck.includes("iq4_nl")) {
+                        selectPq.value = "iq4_nl";
                     } else if (ck.includes("q4_0")) {
-                        selectPq.value = "1";
+                        selectPq.value = "q4_0";
                     } else if (ck.includes("q5_0")) {
-                        selectPq.value = "5";
-                    } else if (ck.includes("q6_k")) {
-                        selectPq.value = "6";
+                        selectPq.value = "q5_0";
                     } else if (ck.includes("q8_0")) {
-                        selectPq.value = "2";
+                        selectPq.value = "q8_0";
                     } else {
-                        selectPq.value = "1";
+                        selectPq.value = "iq4_nl";
                     }
                 } else {
                     checkPq.checked = false;
@@ -519,8 +517,8 @@ function syncUItoBatEditor() {
                 }
                 if (flashAttn !== null) jsonObj.flash_attn = flashAttn;
                 if (pqEnabled) {
-                    const pqMap = { "4": "q3_k", "1": "q4_0", "5": "q5_0", "6": "q6_k", "2": "q8_0" };
-                    const qType = pqMap[pqMode] || "q4_0";
+                    const validModes = ["iq4_nl", "q4_0", "q5_0", "q8_0"];
+                    const qType = validModes.includes(pqMode) ? pqMode : "iq4_nl";
                     jsonObj.cache_type_k = qType;
                     jsonObj.cache_type_v = qType;
                 } else {
@@ -641,14 +639,13 @@ function syncUItoBatEditor() {
             }
         }
         if (pqEnabled) {
-            const pqMap = { "4": "q3_k", "1": "q4_0", "5": "q5_0", "6": "q6_k", "2": "q8_0" };
-            const qType = pqMap[pqMode] || "q4_0";
+            const validModes = ["iq4_nl", "q4_0", "q5_0", "q8_0"];
+            const qType = validModes.includes(pqMode) ? pqMode : "iq4_nl";
             const pqDescMap = {
-                "q3_k": "3-bits (q3_k)",
-                "q4_0": "4-bits (q4_0)",
-                "q5_0": "5-bits (q5_0)",
-                "q6_k": "6-bits (q6_k)",
-                "q8_0": "8-bits (q8_0)"
+                "iq4_nl": "Rendimiento (iq4_nl)",
+                "q4_0": "Ultra Rendimiento (q4_0)",
+                "q5_0": "Equilibrado (q5_0)",
+                "q8_0": "Calidad (q8_0)"
             };
             const qDesc = pqDescMap[qType] || qType;
 
@@ -756,12 +753,11 @@ function syncBatEditorToUI() {
                     if (ck !== "f16" && ck !== "none") {
                         checkPq.checked = true;
                         if (modeGroup) modeGroup.style.display = "flex";
-                        if (ck.includes("q3_k")) selectPq.value = "4";
-                        else if (ck.includes("q4_0")) selectPq.value = "1";
-                        else if (ck.includes("q5_0")) selectPq.value = "5";
-                        else if (ck.includes("q6_k")) selectPq.value = "6";
-                        else if (ck.includes("q8_0")) selectPq.value = "2";
-                        else selectPq.value = "1";
+                        if (ck.includes("iq4_nl")) selectPq.value = "iq4_nl";
+                        else if (ck.includes("q4_0")) selectPq.value = "q4_0";
+                        else if (ck.includes("q5_0")) selectPq.value = "q5_0";
+                        else if (ck.includes("q8_0")) selectPq.value = "q8_0";
+                        else selectPq.value = "iq4_nl";
                     } else {
                         checkPq.checked = false;
                         if (modeGroup) modeGroup.style.display = "none";
@@ -856,12 +852,11 @@ function syncBatEditorToUI() {
             if (ck !== "f16" && ck !== "none") {
                 checkPq.checked = true;
                 if (modeGroup) modeGroup.style.display = "flex";
-                if (ck.includes("q3_k")) selectPq.value = "4";
-                else if (ck.includes("q4_0")) selectPq.value = "1";
-                else if (ck.includes("q5_0")) selectPq.value = "5";
-                else if (ck.includes("q6_k")) selectPq.value = "6";
-                else if (ck.includes("q8_0")) selectPq.value = "2";
-                else selectPq.value = "1";
+                if (ck.includes("iq4_nl")) selectPq.value = "iq4_nl";
+                else if (ck.includes("q4_0")) selectPq.value = "q4_0";
+                else if (ck.includes("q5_0")) selectPq.value = "q5_0";
+                else if (ck.includes("q8_0")) selectPq.value = "q8_0";
+                else selectPq.value = "iq4_nl";
             } else {
                 checkPq.checked = false;
                 if (modeGroup) modeGroup.style.display = "none";
@@ -1072,8 +1067,12 @@ async function onEngineOrPqChange() {
 function onPqCheckboxChange() {
     const enabled = document.getElementById("check-pq-enable").checked;
     const modeGroup = document.getElementById("pq-mode-group");
+    const selectPq = document.getElementById("select-pq-mode");
     if (enabled) {
         modeGroup.style.display = "flex";
+        if (selectPq && !selectPq.value) {
+            selectPq.value = "iq4_nl";
+        }
     } else {
         modeGroup.style.display = "none";
     }
@@ -1370,4 +1369,156 @@ if (document.readyState === "loading") {
 } else {
     initBatchUIEvents();
 }
+
+// ==========================================
+// LLAMA.CPP UPDATE CHECKER & INSTALLER
+// ==========================================
+let currentLlamaUpdateData = null;
+
+async function checkLlamaUpdates() {
+    if (!api) return;
+    const btn = document.getElementById("btn-check-llama-updates");
+    const spinner = document.getElementById("spinner-update-llama");
+    const engineSel = document.getElementById("select-engine");
+    const engine = engineSel ? engineSel.value : "CUDA";
+
+    if (btn) btn.disabled = true;
+    if (spinner) spinner.style.display = "inline";
+
+    try {
+        const res = await api.check_llama_updates(engine);
+        if (!res || !res.success) {
+            alert(res && res.message ? res.message : "Error desconocido al buscar actualizaciones.");
+            return;
+        }
+
+        if (!res.has_update) {
+            alert(`¡Estás al día!\nYa cuentas con la versión más reciente instalada (${res.current_version}).`);
+            return;
+        }
+
+        currentLlamaUpdateData = res;
+
+        // Populate and show modal
+        const modal = document.getElementById("modal-llama-update");
+        const lblCurrent = document.getElementById("lbl-update-current");
+        const lblLatest = document.getElementById("lbl-update-latest");
+        const lblAsset = document.getElementById("lbl-update-asset");
+        const lblNotes = document.getElementById("lbl-update-notes");
+        const linkGh = document.getElementById("btn-update-github-link");
+        const progContainer = document.getElementById("update-progress-container");
+        const btnInstall = document.getElementById("btn-start-update-install");
+
+        if (lblCurrent) lblCurrent.innerText = res.current_version;
+        if (lblLatest) lblLatest.innerText = res.latest_version;
+        if (lblAsset) lblAsset.innerText = res.asset_name ? `${res.asset_name} (${res.size_mb} MB)` : "Sin binario directo disponible";
+        if (lblNotes) lblNotes.innerText = res.release_notes || "Sin notas de versión disponibles.";
+        if (linkGh && res.html_url) linkGh.href = res.html_url;
+
+        if (progContainer) progContainer.style.display = "none";
+        if (btnInstall) {
+            btnInstall.disabled = !res.download_url;
+            btnInstall.innerText = "⬇️ Descargar e Instalar";
+            btnInstall.className = "btn-primary start";
+        }
+
+        if (modal) modal.classList.add("active");
+    } catch (err) {
+        console.error("Error al buscar actualizaciones de llama.cpp:", err);
+        alert("Fallo de red o error al conectar con GitHub.");
+    } finally {
+        if (btn) btn.disabled = false;
+        if (spinner) spinner.style.display = "none";
+    }
+}
+
+function closeLlamaUpdateModal() {
+    const modal = document.getElementById("modal-llama-update");
+    if (modal) modal.classList.remove("active");
+}
+
+async function startLlamaUpdateDownload() {
+    if (!api || !currentLlamaUpdateData || !currentLlamaUpdateData.download_url) return;
+    const btnInstall = document.getElementById("btn-start-update-install");
+    const progContainer = document.getElementById("update-progress-container");
+
+    if (btnInstall) {
+        btnInstall.disabled = true;
+        btnInstall.innerText = "⏳ Descargando...";
+    }
+    if (progContainer) {
+        progContainer.style.display = "flex";
+    }
+
+    try {
+        const res = await api.download_and_install_llama_update(
+            currentLlamaUpdateData.download_url,
+            currentLlamaUpdateData.asset_name,
+            currentLlamaUpdateData.engine
+        );
+        if (!res || !res.success) {
+            alert(res && res.message ? res.message : "Error al iniciar descarga de actualización.");
+            if (btnInstall) {
+                btnInstall.disabled = false;
+                btnInstall.innerText = "⬇️ Descargar e Instalar";
+            }
+        }
+    } catch (err) {
+        console.error("Error al iniciar descarga de actualización:", err);
+        alert("Fallo de comunicación con el motor de escritorio.");
+        if (btnInstall) {
+            btnInstall.disabled = false;
+            btnInstall.innerText = "⬇️ Descargar e Instalar";
+        }
+    }
+}
+
+window.updateLlamaUpdateProgress = function(percent, speed, downloaded_mb, total_mb, status, message) {
+    const bar = document.getElementById("bar-update-progress");
+    const lblPct = document.getElementById("lbl-update-pct");
+    const lblMetrics = document.getElementById("lbl-update-metrics");
+    const lblSpeed = document.getElementById("lbl-update-speed");
+    const lblStatus = document.getElementById("lbl-update-status");
+    const btnInstall = document.getElementById("btn-start-update-install");
+
+    if (bar) bar.style.width = `${percent}%`;
+    if (lblPct) lblPct.innerText = `${percent.toFixed(1)}%`;
+    if (lblMetrics) lblMetrics.innerText = `${downloaded_mb.toFixed(1)} / ${total_mb.toFixed(1)} MB`;
+    if (lblSpeed) lblSpeed.innerText = `${speed.toFixed(2)} MB/s`;
+
+    if (status === "downloading") {
+        if (lblStatus) lblStatus.innerText = message || "Descargando binarios desde GitHub...";
+    } else if (status === "extracting") {
+        if (lblStatus) lblStatus.innerText = message || "Extrayendo y verificando librerías CUDA...";
+        if (bar) bar.style.width = "100%";
+    } else if (status === "completed") {
+        if (lblStatus) {
+            lblStatus.innerText = message || "¡Actualización instalada con éxito!";
+            lblStatus.style.color = "var(--accent-emerald)";
+        }
+        if (bar) {
+            bar.style.width = "100%";
+            bar.style.background = "var(--accent-emerald)";
+        }
+        if (btnInstall) {
+            btnInstall.innerText = "✅ ¡Actualizado!";
+            btnInstall.disabled = true;
+        }
+        // Refresh hardware engines and batch model details
+        if (typeof onEngineOrPqChange === "function") {
+            setTimeout(() => {
+                onEngineOrPqChange();
+            }, 1000);
+        }
+    } else if (status === "error") {
+        if (lblStatus) {
+            lblStatus.innerText = message || "Error en la actualización.";
+            lblStatus.style.color = "var(--accent-rose)";
+        }
+        if (btnInstall) {
+            btnInstall.disabled = false;
+            btnInstall.innerText = "Reintentar Descarga";
+        }
+    }
+};
 

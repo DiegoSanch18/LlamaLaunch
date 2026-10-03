@@ -271,11 +271,10 @@ def update_batch_script_content(content: str, updates: Dict[str, Any]) -> str:
             updated = re.sub(r'-fa\s+(on|off)', f'-fa {fa_val}', updated)
 
     desc_map = {
-        "q3_k": "3-bits (q3_k)",
-        "q4_0": "4-bits (q4_0)",
-        "q5_0": "5-bits (q5_0)",
-        "q6_k": "6-bits (q6_k)",
-        "q8_0": "8-bits (q8_0)",
+        "iq4_nl": "Rendimiento (iq4_nl)",
+        "q4_0": "Ultra Rendimiento (q4_0)",
+        "q5_0": "Equilibrado (q5_0)",
+        "q8_0": "Calidad (q8_0)",
         "f16": "FP16 (sin comprimir)",
         "none": "FP16 (sin comprimir)"
     }

@@ -46,16 +46,15 @@ def get_polar_quant_flags(pq_choice: str) -> Tuple[str, str]:
     Translates user choice into actual llama-server CLI flags for PolarQuant.
     Returns (flags_string, status_string).
     """
-    if pq_choice == "4":
-        return "--cache-type-k q3_K --cache-type-v q3_K -fa on", "Enabled (Ultra Performance: Q3_K + Flash Attention)"
-    elif pq_choice == "1":
-        return "--cache-type-k q4_0 --cache-type-v q4_0 -fa on", "Enabled (Performance: Q4_0 + Flash Attention)"
-    elif pq_choice == "5":
-        return "--cache-type-k q5_0 --cache-type-v q5_0 -fa on", "Enabled (Balanced: Q5_0 + Flash Attention)"
-    elif pq_choice == "6":
-        return "--cache-type-k q6_K --cache-type-v q6_K -fa on", "Enabled (High Quality: Q6_K + Flash Attention)"
-    elif pq_choice == "2":
-        return "--cache-type-k q8_0 --cache-type-v q8_0 -fa on", "Enabled (Max Quality: Q8_0 + Flash Attention)"
+    choice = str(pq_choice).lower().strip()
+    if choice in ("iq4_nl", "rendimiento"):
+        return "--cache-type-k iq4_nl --cache-type-v iq4_nl -fa on", "Enabled (Rendimiento: iq4_nl + Flash Attention)"
+    elif choice in ("q4_0", "ultra_rendimiento", "1", "4"):
+        return "--cache-type-k q4_0 --cache-type-v q4_0 -fa on", "Enabled (Ultra Rendimiento: q4_0 + Flash Attention)"
+    elif choice in ("q5_0", "equilibrado", "5"):
+        return "--cache-type-k q5_0 --cache-type-v q5_0 -fa on", "Enabled (Equilibrado: q5_0 + Flash Attention)"
+    elif choice in ("q8_0", "calidad", "2"):
+        return "--cache-type-k q8_0 --cache-type-v q8_0 -fa on", "Enabled (Calidad: q8_0 + Flash Attention)"
     else:
         # Standard Mode
         return "", "Disabled (Standard FP16)"

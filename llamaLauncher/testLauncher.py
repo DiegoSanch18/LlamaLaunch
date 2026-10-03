@@ -128,17 +128,28 @@ class TestConfigModule(unittest.TestCase):
 
     def test_polar_quant_flags(self):
         """Verifies PolarQuant flag matching and string generation."""
-        # 1. Performance mode (4-bit)
-        flags_1, status_1 = config.get_polar_quant_flags("1")
+        # 1. Ultra Rendimiento (4-bit q4_0)
+        flags_1, status_1 = config.get_polar_quant_flags("ultra_rendimiento")
         self.assertIn("q4_0", flags_1)
-        self.assertIn("Flash Attention", status_1)
-        
-        # 2. Quality mode (8-bit)
-        flags_2, status_2 = config.get_polar_quant_flags("2")
+        self.assertIn("Ultra Rendimiento", status_1)
+
+        # 2. Rendimiento (4-bit iq4_nl)
+        flags_nl, status_nl = config.get_polar_quant_flags("rendimiento")
+        self.assertIn("iq4_nl", flags_nl)
+        self.assertIn("Rendimiento", status_nl)
+
+        # 3. Equilibrado (5-bit q5_0)
+        flags_eq, status_eq = config.get_polar_quant_flags("equilibrado")
+        self.assertIn("q5_0", flags_eq)
+        self.assertIn("Equilibrado", status_eq)
+
+        # 4. Calidad (8-bit q8_0)
+        flags_2, status_2 = config.get_polar_quant_flags("calidad")
         self.assertIn("q8_0", flags_2)
-        
-        # 3. Off / Standard mode
-        flags_3, status_3 = config.get_polar_quant_flags("3")
+        self.assertIn("Calidad", status_2)
+
+        # 5. Off / Standard mode
+        flags_3, status_3 = config.get_polar_quant_flags("none")
         self.assertEqual(flags_3, "")
         self.assertIn("Disabled", status_3)
 
@@ -156,7 +167,7 @@ class TestConfigModule(unittest.TestCase):
         params_cpu_perf = config.optimize_params("CPU", physical_cores=4, pq_choice="1")
         self.assertEqual(params_cpu_perf["context"], 16384)
 
-        # CPU Ultra Performance Mode (Q3_K) -> 16384 tokens (capped)
+        # CPU Ultra Rendimiento Mode (q4_0) -> 16384 tokens (capped)
         params_cpu_ultra = config.optimize_params("CPU", physical_cores=4, pq_choice="4")
         self.assertEqual(params_cpu_ultra["context"], 16384)
 
@@ -1115,17 +1126,17 @@ class TestJsonConfigManagement(unittest.TestCase):
             "  --ubatch-size 512 ^\r\n"
             "  --threads 8\r\n"
         )
-        # Update with q3_k (which was not present in the script)
+        # Update with iq4_nl (which was not present in the script)
         updated = batch_manager.update_batch_script_content(sample_bat, {
-            "cache_type_k": "q3_k",
-            "cache_type_v": "q3_k",
+            "cache_type_k": "iq4_nl",
+            "cache_type_v": "iq4_nl",
             "context": 32768
         })
 
-        self.assertIn("--cache-type-k  q3_k", updated)
-        self.assertIn("--cache-type-v  q3_k", updated)
+        self.assertIn("--cache-type-k  iq4_nl", updated)
+        self.assertIn("--cache-type-v  iq4_nl", updated)
         self.assertIn("--ctx-size      32768", updated)
-        self.assertIn("echo  KV Cache        : 3-bits (q3_k) ^| Contexto: 32768 tokens", updated)
+        self.assertIn("echo  KV Cache        : Rendimiento (iq4_nl) ^| Contexto: 32768 tokens", updated)
 
     def test_engine_binary_update_in_batch(self):
         """Verifies that engine changes (CPU/VULKAN/CUDA) update the generic binary folder path in batch scripts."""
@@ -1238,6 +1249,23 @@ class TestJsonConfigManagement(unittest.TestCase):
         self.assertEqual(details["config_format"], "JSON")
         self.assertEqual(details["port"], 8888)
         self.assertTrue(details["filename"].endswith(".json"))
+
+
+class TestLlamaUpdateChecker(unittest.TestCase):
+    """Verifies ApiBridge update checking logic and version parsing."""
+
+    def test_update_checker_structure(self):
+        if not HAS_API_BRIDGE:
+            self.skipTest("ApiBridge not imported.")
+        bridge = ApiBridge()
+        res = bridge.check_llama_updates("CUDA")
+        self.assertIn("success", res)
+        if res.get("success"):
+            self.assertIn("current_version", res)
+            self.assertIn("latest_version", res)
+            self.assertIn("has_update", res)
+            self.assertIn("engine", res)
+            self.assertEqual(res["engine"], "CUDA")
 
 
 class TestRealEcosystemLiveVerification(unittest.TestCase):
