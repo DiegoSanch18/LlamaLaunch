@@ -447,6 +447,17 @@ function syncUItoBatEditor() {
                 content = content.replace(/set\s+["\']?MMPROJ_FLAG=[^\r\n]*/i, 'set "MMPROJ_FLAG="');
             }
         }
+        if (engine) {
+            const binMap = {
+                "CPU": "llama-b9283-bin-win-cpu-x64",
+                "VULKAN": "llama-b9297-bin-win-vulkan-x64",
+                "CUDA": "llama-b9297-bin-win-cuda-x64"
+            };
+            const targetBin = binMap[engine];
+            if (targetBin) {
+                content = content.replace(/llama-(?:b\d+)?-?bin-win-(?:cuda|vulkan|cpu)-x64/g, targetBin);
+            }
+        }
         if (port && !isNaN(port)) {
             content = content.replace(/--port\s+\d+/, `--port          ${port}`);
             content = content.replace(/Puerto\s*:\s*\d+/, `Puerto : ${port}`);
@@ -458,6 +469,7 @@ function syncUItoBatEditor() {
             } else if (/-c\s+\d+/.test(content)) {
                 content = content.replace(/-c\s+\d+/, `-c ${context}`);
             }
+            content = content.replace(/Contexto:\s*\d+\s*tokens/g, `Contexto: ${context} tokens`);
         }
         if (threads && !isNaN(threads)) {
             if (/--threads\s+\d+/.test(content)) {
@@ -484,11 +496,39 @@ function syncUItoBatEditor() {
         if (pqEnabled) {
             const pqMap = { "4": "q3_k", "1": "q4_0", "5": "q5_0", "6": "q6_k", "2": "q8_0" };
             const qType = pqMap[pqMode] || "q4_0";
-            if (/--cache-type-k\s+[A-Za-z0-9_]+/.test(content)) {
+            const pqDescMap = {
+                "q3_k": "3-bits (q3_k)",
+                "q4_0": "4-bits (q4_0)",
+                "q5_0": "5-bits (q5_0)",
+                "q6_k": "6-bits (q6_k)",
+                "q8_0": "8-bits (q8_0)"
+            };
+            const qDesc = pqDescMap[qType] || qType;
+
+            const hasK = /--cache-type-k\s+[A-Za-z0-9_]+/.test(content);
+            const hasV = /--cache-type-v\s+[A-Za-z0-9_]+/.test(content);
+
+            if (hasK) {
                 content = content.replace(/--cache-type-k\s+[A-Za-z0-9_]+/, `--cache-type-k  ${qType}`);
             }
-            if (/--cache-type-v\s+[A-Za-z0-9_]+/.test(content)) {
+            if (hasV) {
                 content = content.replace(/--cache-type-v\s+[A-Za-z0-9_]+/, `--cache-type-v  ${qType}`);
+            }
+            if (!hasK && !hasV) {
+                const mTarget = content.match(/(--ubatch-size\s+\d+\s*\^|--ctx-size\s+\d+\s*\^|--flash-attn\s+(?:on|off)\s*\^)/);
+                if (mTarget) {
+                    content = content.replace(mTarget[0], `${mTarget[0]}\r\n  --cache-type-k  ${qType}        ^\r\n  --cache-type-v  ${qType}        ^`);
+                }
+            } else if (hasK && !hasV) {
+                content = content.replace(/(--cache-type-k\s+[A-Za-z0-9_]+\s*\^)/, `$1\r\n  --cache-type-v  ${qType}        ^`);
+            } else if (hasV && !hasK) {
+                content = content.replace(/(--cache-type-v\s+[A-Za-z0-9_]+\s*\^)/, `--cache-type-k  ${qType}        ^\r\n  $1`);
+            }
+
+            if (/echo\s+KV Cache\s*:[^\r\n]*\^?\|\s*Contexto:\s*\d+\s*tokens/.test(content)) {
+                content = content.replace(/echo\s+KV Cache\s*:[^\r\n]*(\^?\|\s*Contexto:\s*\d+\s*tokens)/, `echo  KV Cache        : ${qDesc} $1`);
+            } else if (/echo\s+KV Cache\s*:.*/.test(content)) {
+                content = content.replace(/echo\s+KV Cache\s*:.*/, `echo  KV Cache        : ${qDesc}`);
             }
         } else {
             if (/--cache-type-k\s+[A-Za-z0-9_]+/.test(content)) {
@@ -496,6 +536,11 @@ function syncUItoBatEditor() {
             }
             if (/--cache-type-v\s+[A-Za-z0-9_]+/.test(content)) {
                 content = content.replace(/--cache-type-v\s+[A-Za-z0-9_]+/, `--cache-type-v  f16`);
+            }
+            if (/echo\s+KV Cache\s*:[^\r\n]*\^?\|\s*Contexto:\s*\d+\s*tokens/.test(content)) {
+                content = content.replace(/echo\s+KV Cache\s*:[^\r\n]*(\^?\|\s*Contexto:\s*\d+\s*tokens)/, `echo  KV Cache        : FP16 (sin comprimir) $1`);
+            } else if (/echo\s+KV Cache\s*:.*/.test(content)) {
+                content = content.replace(/echo\s+KV Cache\s*:.*/, `echo  KV Cache        : FP16 (sin comprimir)`);
             }
         }
         if (temp !== null && !isNaN(temp)) {
@@ -1104,7 +1149,8 @@ function openWebUI() {
 function initBatchUIEvents() {
     const inputs = [
         "input-port", "input-threads", "input-context", "input-ngl",
-        "check-flash-attn", "input-temp", "input-topp", "input-topk", "input-minp"
+        "check-flash-attn", "check-pq-enable", "select-pq-mode",
+        "input-temp", "input-topp", "input-topk", "input-minp"
     ];
     inputs.forEach(id => {
         const el = document.getElementById(id);

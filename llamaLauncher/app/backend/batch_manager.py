@@ -194,6 +194,8 @@ def update_batch_script_content(content: str, updates: Dict[str, Any]) -> str:
             updated = re.sub(r'--ctx-size\s+\d+', f'--ctx-size      {ctx}', updated)
         elif re.search(r'-c\s+\d+', updated):
             updated = re.sub(r'-c\s+\d+', f'-c {ctx}', updated)
+        # Also update comments or echo with Contexto: ... tokens
+        updated = re.sub(r'Contexto:\s*\d+\s*tokens', f'Contexto: {ctx} tokens', updated)
 
     if "threads" in updates and updates["threads"] is not None:
         th = int(updates["threads"])
@@ -222,6 +224,21 @@ def update_batch_script_content(content: str, updates: Dict[str, Any]) -> str:
         elif re.search(r'-ngl\s+\d+', updated):
             updated = re.sub(r'-ngl\s+\d+', f'-ngl {ngl}', updated)
 
+    if "engine" in updates and updates["engine"]:
+        engine_val = str(updates["engine"]).upper().strip()
+        bin_map = {
+            "CPU": "llama-b9283-bin-win-cpu-x64",
+            "VULKAN": "llama-b9297-bin-win-vulkan-x64",
+            "CUDA": "llama-b9297-bin-win-cuda-x64"
+        }
+        target_bin_folder = bin_map.get(engine_val)
+        if target_bin_folder:
+            updated = re.sub(
+                r'llama-(?:b\d+)?-?bin-win-(?:cuda|vulkan|cpu)-x64',
+                target_bin_folder,
+                updated
+            )
+
     if "flash_attn" in updates and updates["flash_attn"] is not None:
         fa_val = "on" if updates["flash_attn"] else "off"
         if re.search(r'--flash-attn\s+(on|off)', updated):
@@ -229,15 +246,70 @@ def update_batch_script_content(content: str, updates: Dict[str, Any]) -> str:
         elif re.search(r'-fa\s+(on|off)', updated):
             updated = re.sub(r'-fa\s+(on|off)', f'-fa {fa_val}', updated)
 
-    if "cache_type_k" in updates and updates["cache_type_k"]:
-        ck = str(updates["cache_type_k"]).lower()
-        if re.search(r'--cache-type-k\s+[A-Za-z0-9_]+', updated):
-            updated = re.sub(r'--cache-type-k\s+[A-Za-z0-9_]+', f'--cache-type-k  {ck}', updated)
+    desc_map = {
+        "q3_k": "3-bits (q3_k)",
+        "q4_0": "4-bits (q4_0)",
+        "q5_0": "5-bits (q5_0)",
+        "q6_k": "6-bits (q6_k)",
+        "q8_0": "8-bits (q8_0)",
+        "f16": "FP16 (sin comprimir)",
+        "none": "FP16 (sin comprimir)"
+    }
 
-    if "cache_type_v" in updates and updates["cache_type_v"]:
-        cv = str(updates["cache_type_v"]).lower()
-        if re.search(r'--cache-type-v\s+[A-Za-z0-9_]+', updated):
-            updated = re.sub(r'--cache-type-v\s+[A-Za-z0-9_]+', f'--cache-type-v  {cv}', updated)
+    ck = updates.get("cache_type_k")
+    cv = updates.get("cache_type_v")
+    if ck is not None:
+        ck = str(ck).lower().strip()
+    if cv is not None:
+        cv = str(cv).lower().strip()
+    elif ck is not None:
+        cv = ck
+
+    if ck:
+        has_k = bool(re.search(r'--cache-type-k\s+[A-Za-z0-9_]+', updated))
+        has_v = bool(re.search(r'--cache-type-v\s+[A-Za-z0-9_]+', updated))
+
+        if ck in ("f16", "none"):
+            if has_k:
+                updated = re.sub(r'--cache-type-k\s+[A-Za-z0-9_]+', '--cache-type-k  f16', updated)
+            if has_v:
+                updated = re.sub(r'--cache-type-v\s+[A-Za-z0-9_]+', '--cache-type-v  f16', updated)
+        else:
+            if has_k:
+                updated = re.sub(r'--cache-type-k\s+[A-Za-z0-9_]+', f'--cache-type-k  {ck}', updated)
+            if has_v:
+                updated = re.sub(r'--cache-type-v\s+[A-Za-z0-9_]+', f'--cache-type-v  {cv}', updated)
+
+            if not has_k and not has_v:
+                # Insert flags into server invocation block
+                m_target = re.search(r'(--ubatch-size\s+\d+\s*\^|--ctx-size\s+\d+\s*\^|--flash-attn\s+(?:on|off)\s*\^)', updated)
+                if m_target:
+                    insert_lines = f"\r\n  --cache-type-k  {ck}        ^\r\n  --cache-type-v  {cv}        ^"
+                    updated = updated[:m_target.end()] + insert_lines + updated[m_target.end():]
+                else:
+                    m_model = re.search(r'(--model\s+["\'][^"\']+["\']\s*\^|--model\s+\S+\s*\^)', updated)
+                    if m_model:
+                        insert_lines = f"\r\n  --cache-type-k  {ck}        ^\r\n  --cache-type-v  {cv}        ^"
+                        updated = updated[:m_model.end()] + insert_lines + updated[m_model.end():]
+            elif has_k and not has_v:
+                updated = re.sub(r'(--cache-type-k\s+[A-Za-z0-9_]+\s*\^)', rf'\1\r\n  --cache-type-v  {cv}        ^', updated)
+            elif has_v and not has_k:
+                updated = re.sub(r'(--cache-type-v\s+[A-Za-z0-9_]+\s*\^)', rf'--cache-type-k  {ck}        ^\r\n  \1', updated)
+
+        # Synchronize header echo banner for KV Cache
+        cache_desc = desc_map.get(ck, ck)
+        if re.search(r'echo\s+KV Cache\s*:[^\r\n]*\^?\|\s*Contexto:\s*\d+\s*tokens', updated):
+            ctx_match = re.search(r'Contexto:\s*(\d+)\s*tokens', updated)
+            ctx_tokens = ctx_match.group(1) if ctx_match else "16384"
+            if "context" in updates and updates["context"]:
+                ctx_tokens = str(updates["context"])
+            updated = re.sub(
+                r'echo\s+KV Cache\s*:[^\r\n]*\^?\|\s*Contexto:\s*\d+\s*tokens',
+                f'echo  KV Cache        : {cache_desc} ^| Contexto: {ctx_tokens} tokens',
+                updated
+            )
+        elif re.search(r'echo\s+KV Cache\s*:.*', updated):
+            updated = re.sub(r'echo\s+KV Cache\s*:.*', f'echo  KV Cache        : {cache_desc}', updated)
 
     if "temp" in updates and updates["temp"] is not None:
         temp = float(updates["temp"])

@@ -1101,6 +1101,49 @@ class TestJsonConfigManagement(unittest.TestCase):
         self.assertIn('set "MMPROJ=%BASEDIR%mmproj-test.gguf"', bat_on)
         self.assertIn('set "MMPROJ_FLAG=--mmproj "!MMPROJ!""', bat_on)
 
+    def test_insert_missing_kv_cache_flags_and_update_echo_banner(self):
+        """Verifies that missing KV cache flags are cleanly inserted into batch scripts and echo banner updates."""
+        if not HAS_BATCH_MANAGER:
+            self.skipTest("batch_manager not imported.")
+
+        sample_bat = (
+            "@echo off\r\n"
+            "echo  KV Cache        : FP16/q4_0 ^| Contexto: 16384 tokens\r\n"
+            "llama-server.exe ^\r\n"
+            "  --model \"test.gguf\" ^\r\n"
+            "  --ctx-size 16384 ^\r\n"
+            "  --ubatch-size 512 ^\r\n"
+            "  --threads 8\r\n"
+        )
+        # Update with q3_k (which was not present in the script)
+        updated = batch_manager.update_batch_script_content(sample_bat, {
+            "cache_type_k": "q3_k",
+            "cache_type_v": "q3_k",
+            "context": 32768
+        })
+
+        self.assertIn("--cache-type-k  q3_k", updated)
+        self.assertIn("--cache-type-v  q3_k", updated)
+        self.assertIn("--ctx-size      32768", updated)
+        self.assertIn("echo  KV Cache        : 3-bits (q3_k) ^| Contexto: 32768 tokens", updated)
+
+    def test_engine_binary_update_in_batch(self):
+        """Verifies that engine changes (CPU/VULKAN/CUDA) update the generic binary folder path in batch scripts."""
+        if not HAS_BATCH_MANAGER:
+            self.skipTest("batch_manager not imported.")
+
+        sample_bat = (
+            "@echo off\r\n"
+            "set \"BINDIR=%BASEDIR%..\\llamaLauncher\\bin\\llama.cpp\\llama-b9297-bin-win-cuda-x64\"\r\n"
+            "llama-server.exe --ctx-size 8192\r\n"
+        )
+        updated_cpu = batch_manager.update_batch_script_content(sample_bat, {"engine": "CPU"})
+        self.assertIn("llama-b9283-bin-win-cpu-x64", updated_cpu)
+        self.assertNotIn("llama-b9297-bin-win-cuda-x64", updated_cpu)
+
+        updated_vulkan = batch_manager.update_batch_script_content(sample_bat, {"engine": "VULKAN"})
+        self.assertIn("llama-b9297-bin-win-vulkan-x64", updated_vulkan)
+
     def test_api_prioritizes_json_config(self):
         """Verifies that ApiBridge.get_model_batch_details prioritizes .json configuration files."""
         if not HAS_API_BRIDGE:
