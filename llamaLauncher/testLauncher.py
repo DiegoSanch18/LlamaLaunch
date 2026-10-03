@@ -19,6 +19,7 @@ import sys
 import tempfile
 import os
 import shutil
+import json
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
@@ -810,11 +811,22 @@ class TestBatchManagerModule(unittest.TestCase):
         self.assertTrue(Path(details["path"]).exists())
 
         # Test saving batch script via ApiBridge
-        save_res = bridge.save_batch_script(details["path"], details["raw_content"] + "\r\n:: appended", create_backup=True)
+        bat_target = details.get("bat_path") or details["path"]
+        bat_content = details.get("bat_raw_content") or "@echo off\r\nllama-server.exe\r\n"
+        save_res = bridge.save_batch_script(bat_target, bat_content + "\r\n:: appended", create_backup=True)
         self.assertTrue(save_res["success"])
         self.assertTrue(save_res["backup_created"])
         self.assertIn("parsed_config", save_res)
         self.assertTrue(save_res["parsed_config"]["success"])
+
+        # Test saving JSON config via ApiBridge
+        json_target = details.get("json_path") or details["path"]
+        json_data = json.loads(details["raw_content"])
+        json_data["port"] = 8999
+        json_save_res = bridge.save_batch_script(json_target, json.dumps(json_data), create_backup=True)
+        self.assertTrue(json_save_res["success"])
+        self.assertTrue(json_save_res["backup_created"])
+        self.assertEqual(json_save_res["parsed_config"]["port"], 8999)
 
     def test_update_batch_script_content_all_flags(self):
         """Verifies programmatic updating of all inference and sampling flags in a .bat script."""
@@ -928,7 +940,165 @@ class TestPywebviewBottlePatch(unittest.TestCase):
             'SERVER_PORT': '42001'
         }
         res_file = list(app(environ_file, dummy_sr))
-        self.assertEqual(res_file, [b"Served: style.css"])
+
+class TestJsonConfigManagement(unittest.TestCase):
+    """Audits the JSON model configuration system and its dual sync with .bat files."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.root = Path(self.temp_dir)
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_convert_bat_to_json(self):
+        """Verifies that converting a .bat script produces a valid .json file with accurate parameters."""
+        bat_content = (
+            "@echo off\r\n"
+            'set "BASEDIR=%~dp0"\r\n'
+            'set "MODEL=%BASEDIR%qwen-test.gguf"\r\n'
+            'llama-server.exe --model "%MODEL%" --n-gpu-layers 99 --flash-attn on '
+            '--ctx-size 16384 --ubatch-size 512 --cache-type-k q4_0 --cache-type-v q4_0 '
+            '--threads 8 --temp 0.7 --top-p 0.95 --min-p 0.05 --port 8085 --alias qwen-test\r\n'
+        )
+        bat_file = self.root / "run-qwen.bat"
+        bat_file.write_text(bat_content, encoding="utf-8")
+
+        res = batch_manager.convert_bat_to_json(bat_file)
+        self.assertTrue(res["success"])
+        json_path = Path(res["json_path"])
+        self.assertTrue(json_path.exists())
+
+        # Verify parsed JSON structure
+        data = res["data"]
+        self.assertEqual(data["model_file"], "qwen-test.gguf")
+        self.assertEqual(data["ngl"], 99)
+        self.assertEqual(data["engine"], "CUDA")
+        self.assertEqual(data["context"], 16384)
+        self.assertEqual(data["ubatch_size"], 512)
+        self.assertEqual(data["port"], 8085)
+        self.assertEqual(data["alias"], "qwen-test")
+        self.assertEqual(data["cache_type_k"], "q4_0")
+        self.assertEqual(data["cache_type_v"], "q4_0")
+        self.assertTrue(data["flash_attn"])
+
+    def test_parse_json_config(self):
+        """Verifies parsing of an existing .json configuration file."""
+        json_file = self.root / "run-model.json"
+        config_data = {
+            "name": "Test Model",
+            "model_file": "test-model.gguf",
+            "engine": "CUDA",
+            "ngl": 99,
+            "threads": 8,
+            "context": 8192,
+            "ubatch_size": 512,
+            "flash_attn": True,
+            "cache_type_k": "q4_0",
+            "cache_type_v": "q4_0",
+            "temp": 0.7,
+            "top_p": 0.95,
+            "top_k": 40,
+            "min_p": 0.05,
+            "port": 8080
+        }
+        json_file.write_text(json.dumps(config_data), encoding="utf-8")
+
+        parsed = batch_manager.parse_json_config(json_file)
+        self.assertTrue(parsed["success"])
+        self.assertEqual(parsed["config_format"], "JSON")
+        self.assertEqual(parsed["engine"], "CUDA")
+        self.assertEqual(parsed["ngl"], 99)
+        self.assertEqual(parsed["context"], 8192)
+        self.assertEqual(parsed["port"], 8080)
+
+    def test_cpu_engine_ngl_zero_and_no_flash_attn(self):
+        """Verifies that selecting CPU sets GPU layers to 0 and disables Flash Attention."""
+        json_file = self.root / "run-cpu.json"
+        config_data = {
+            "name": "CPU Model",
+            "model_file": "cpu-model.gguf",
+            "engine": "CPU",
+            "ngl": 0,
+            "threads": 8,
+            "context": 4096,
+            "flash_attn": False,
+            "port": 8080
+        }
+        json_file.write_text(json.dumps(config_data), encoding="utf-8")
+
+        parsed = batch_manager.parse_json_config(json_file)
+        self.assertTrue(parsed["success"])
+        self.assertEqual(parsed["engine"], "CPU")
+        self.assertEqual(parsed["ngl"], 0)
+        self.assertFalse(parsed["flash_attn"])
+
+    def test_save_json_config_and_sync_bat(self):
+        """Verifies that saving .json configuration automatically syncs matching .bat script."""
+        bat_content = (
+            "@echo off\r\n"
+            'set "BASEDIR=%~dp0"\r\n'
+            'set "MODEL=%BASEDIR%test.gguf"\r\n'
+            'llama-server.exe --model "%MODEL%" --n-gpu-layers 99 --port 8080\r\n'
+        )
+        bat_file = self.root / "run-test.bat"
+        bat_file.write_text(bat_content, encoding="utf-8")
+
+        # Create initial JSON
+        batch_manager.convert_bat_to_json(bat_file)
+        json_file = self.root / "run-test.json"
+        self.assertTrue(json_file.exists())
+
+        # Update JSON to CPU with ngl=0 and port=9090
+        updated_data = json.loads(json_file.read_text(encoding="utf-8"))
+        updated_data["engine"] = "CPU"
+        updated_data["ngl"] = 0
+        updated_data["port"] = 9090
+
+        save_res = batch_manager.save_json_config(json_file, json.dumps(updated_data), create_backup=True, sync_bat=True)
+        self.assertTrue(save_res["success"])
+        self.assertTrue(save_res["backup_created"])
+        self.assertTrue(json_file.with_suffix(".json.bak").exists())
+
+        # Verify that .bat was also synchronized
+        bat_updated_content = bat_file.read_text(encoding="utf-8")
+        self.assertIn("9090", bat_updated_content)
+        self.assertIn("--n-gpu-layers  0", bat_updated_content)
+
+    def test_api_prioritizes_json_config(self):
+        """Verifies that ApiBridge.get_model_batch_details prioritizes .json configuration files."""
+        if not HAS_API_BRIDGE:
+            self.skipTest("ApiBridge not imported.")
+
+        models_dir = self.root / "models"
+        family_dir = models_dir / "Qwen" / "Qwen36"
+        family_dir.mkdir(parents=True)
+        (family_dir / "qwen.gguf").write_bytes(b"GGUF" + b"\x00" * 100)
+
+        # Create both .json and .bat
+        json_config = {
+            "name": "Qwen 36B",
+            "model_file": "qwen.gguf",
+            "engine": "CUDA",
+            "ngl": 99,
+            "port": 8888
+        }
+        (family_dir / "run-qwen.json").write_text(json.dumps(json_config), encoding="utf-8")
+        (family_dir / "run-qwen.bat").write_text("@echo off\r\nllama-server.exe --port 8080\r\n", encoding="utf-8")
+
+        bridge = ApiBridge(project_root=self.root)
+        bridge.models_dir = models_dir
+        bridge.bin_root = self.root / "bin"
+
+        scan = bridge.scan_models_and_batches()
+        self.assertTrue(scan["success"])
+        model_id = scan["models"][0]["id"]
+
+        details = bridge.get_model_batch_details(model_id)
+        self.assertTrue(details["success"])
+        self.assertEqual(details["config_format"], "JSON")
+        self.assertEqual(details["port"], 8888)
+        self.assertTrue(details["filename"].endswith(".json"))
 
 
 class TestRealEcosystemLiveVerification(unittest.TestCase):

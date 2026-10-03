@@ -200,46 +200,28 @@ async function onBatchModelChange() {
             }
 
             // Binary and Engine Resolution Status
-            if (badge) {
-                const bInfo = details.binary_info;
-                if (bInfo && bInfo.success) {
-                    if (bInfo.is_dedicated) {
-                        badge.className = "binary-status-badge dedicated";
-                        const modelName = (details.model_info && details.model_info.family) ? details.model_info.family : "Dedicado";
-                        badge.innerText = `⚡ Dedicado (${modelName})`;
-                        badge.title = `Binario dedicado: ${bInfo.binary_path}`;
-                    } else {
-                        badge.className = "binary-status-badge generic";
-                        const bName = bInfo.build ? `${bInfo.binary_type} ${bInfo.build}` : bInfo.binary_type;
-                        badge.innerText = `🚀 ${bName}`;
-                        badge.title = `Binario genérico: ${bInfo.binary_path}`;
-                    }
-
-                    const selectEngine = document.getElementById("select-engine");
-                    if (selectEngine && bInfo.binary_type) {
-                        const mappedType = bInfo.binary_type === "CUSTOM_DEDICATED" ? "CUDA" : bInfo.binary_type;
-                        selectEngine.value = mappedType;
-                    }
-                } else {
-                    badge.className = "binary-status-badge";
-                    badge.innerText = "Binario genérico";
-                }
+            const selectEngine = document.getElementById("select-engine");
+            const engineVal = details.engine || (details.ngl === 0 ? "CPU" : ((details.binary_info && details.binary_info.binary_type === "CUSTOM_DEDICATED") ? "CUDA" : (details.binary_info ? details.binary_info.binary_type : "CUDA")));
+            if (selectEngine) {
+                selectEngine.value = engineVal;
             }
+            handleEngineUI(engineVal);
 
-            // Raw .BAT Script Editor Populate
+            // Raw Configuration Editor Populate (.json / .bat)
             const lblBatFilename = document.getElementById("lbl-bat-filename");
-            if (lblBatFilename) lblBatFilename.innerText = details.filename || "run.bat";
+            if (lblBatFilename) lblBatFilename.innerText = details.filename || "config.json";
 
             const editorBat = document.getElementById("editor-bat-content");
             if (editorBat) editorBat.value = details.raw_content || "";
 
             const backupPill = document.getElementById("lbl-bat-backup-status");
             if (backupPill) {
+                const ext = (details.filename && details.filename.endsWith(".json")) ? ".json" : ".bat";
                 if (details.has_backup) {
-                    backupPill.innerText = "Backup: .bat.bak existe";
+                    backupPill.innerText = `Backup: ${ext}.bak existe`;
                     backupPill.style.color = "var(--accent-emerald)";
                 } else {
-                    backupPill.innerText = "Auto-backup .bat.bak al guardar";
+                    backupPill.innerText = `Auto-backup ${ext}.bak al guardar`;
                     backupPill.style.color = "var(--accent-amber)";
                 }
             }
@@ -270,7 +252,71 @@ function markBatPendingChanges() {
 }
 
 /**
- * Synchronizes modifications from the UI parameter inputs into the raw .BAT editor textarea.
+ * Updates UI controls (NGL, Flash Attention, Badges) based on selected Execution Engine.
+ * When CPU is selected, sets GPU layers (NGL) to 0 and disables the input.
+ */
+function handleEngineUI(engine) {
+    const inputNgl = document.getElementById("input-ngl");
+    const checkFa = document.getElementById("check-flash-attn");
+    const badge = document.getElementById("lbl-binary-badge");
+
+    if (engine === "CPU") {
+        if (inputNgl) {
+            const currentVal = parseInt(inputNgl.value);
+            if (!isNaN(currentVal) && currentVal > 0) {
+                inputNgl.dataset.prevNgl = currentVal;
+            }
+            inputNgl.value = 0;
+            inputNgl.disabled = true;
+            inputNgl.title = "En modo CPU las capas GPU se desactivan (0)";
+        }
+        if (checkFa) {
+            checkFa.checked = false;
+            checkFa.disabled = true;
+            checkFa.title = "Flash Attention solo está soportado en GPUs NVIDIA con CUDA";
+        }
+        if (badge) {
+            badge.className = "binary-status-badge cpu";
+            badge.innerText = "💻 CPU Universal (b9283 / AVX2)";
+            badge.title = "Inferencia pura en procesador del sistema sin offload GPU";
+        }
+    } else {
+        if (inputNgl) {
+            inputNgl.disabled = false;
+            inputNgl.title = "";
+            const restored = inputNgl.dataset.prevNgl || (currentBatchDetails ? (currentBatchDetails.ngl || 99) : 99);
+            if (parseInt(inputNgl.value) === 0) {
+                inputNgl.value = restored;
+            }
+        }
+        if (checkFa) {
+            checkFa.disabled = false;
+            checkFa.title = "";
+            checkFa.checked = (engine === "CUDA");
+        }
+        if (badge) {
+            if (engine === "VULKAN") {
+                badge.className = "binary-status-badge vulkan";
+                badge.innerText = "⚡ Vulkan b9297";
+                badge.title = "Aceleración gráfica Vulkan (AMD / Intel / Generic)";
+            } else {
+                if (currentBatchDetails && currentBatchDetails.binary_info && currentBatchDetails.binary_info.is_dedicated) {
+                    badge.className = "binary-status-badge dedicated";
+                    const modelName = (currentBatchDetails.model_info && currentBatchDetails.model_info.family) ? currentBatchDetails.model_info.family : "Dedicado";
+                    badge.innerText = `⚡ Dedicado (${modelName})`;
+                    badge.title = `Binario dedicado: ${currentBatchDetails.binary_info.binary_path}`;
+                } else {
+                    badge.className = "binary-status-badge generic";
+                    badge.innerText = "🚀 CUDA b9297";
+                    badge.title = "Aceleración NVIDIA CUDA con Flash Attention";
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Synchronizes modifications from the UI parameter inputs into the raw .BAT or .JSON editor textarea.
  */
 function syncUItoBatEditor() {
     if (isSyncing) return;
@@ -294,7 +340,44 @@ function syncUItoBatEditor() {
         const topP = document.getElementById("input-topp") ? parseFloat(document.getElementById("input-topp").value) : null;
         const topK = document.getElementById("input-topk") ? parseInt(document.getElementById("input-topk").value) : null;
         const minP = document.getElementById("input-minp") ? parseFloat(document.getElementById("input-minp").value) : null;
+        const engine = document.getElementById("select-engine") ? document.getElementById("select-engine").value : "CUDA";
 
+        // JSON format synchronization
+        if (content.trim().startsWith("{")) {
+            try {
+                const jsonObj = JSON.parse(content);
+                if (port && !isNaN(port)) jsonObj.port = port;
+                if (context && !isNaN(context)) jsonObj.context = context;
+                if (threads && !isNaN(threads)) jsonObj.threads = threads;
+                if (ngl !== null && !isNaN(ngl)) jsonObj.ngl = ngl;
+                jsonObj.engine = engine;
+                if (flashAttn !== null) jsonObj.flash_attn = flashAttn;
+                if (pqEnabled) {
+                    const pqMap = { "4": "q3_k", "1": "q4_0", "5": "q5_0", "6": "q6_k", "2": "q8_0" };
+                    const qType = pqMap[pqMode] || "q4_0";
+                    jsonObj.cache_type_k = qType;
+                    jsonObj.cache_type_v = qType;
+                } else {
+                    jsonObj.cache_type_k = "f16";
+                    jsonObj.cache_type_v = "f16";
+                }
+                if (temp !== null && !isNaN(temp)) jsonObj.temp = temp;
+                if (topP !== null && !isNaN(topP)) jsonObj.top_p = topP;
+                if (topK !== null && !isNaN(topK)) jsonObj.top_k = topK;
+                if (minP !== null && !isNaN(minP)) jsonObj.min_p = minP;
+
+                const newJsonStr = JSON.stringify(jsonObj, null, 2);
+                if (editor.value !== newJsonStr) {
+                    editor.value = newJsonStr;
+                    markBatPendingChanges();
+                }
+                return;
+            } catch (e) {
+                // Incomplete JSON during typing, fall through
+            }
+        }
+
+        // Batch script format fallback
         if (port && !isNaN(port)) {
             content = content.replace(/--port\s+\d+/, `--port          ${port}`);
             content = content.replace(/Puerto\s*:\s*\d+/, `Puerto : ${port}`);
@@ -369,7 +452,7 @@ function syncUItoBatEditor() {
 }
 
 /**
- * Synchronizes modifications typed directly into the raw .BAT textarea back into the UI controls.
+ * Synchronizes modifications typed directly into the raw .BAT or .JSON textarea back into the UI controls.
  */
 function syncBatEditorToUI() {
     if (isSyncing) return;
@@ -378,6 +461,72 @@ function syncBatEditorToUI() {
 
     const content = editor.value;
     if (!content) return;
+
+    // JSON format synchronization
+    if (content.trim().startsWith("{")) {
+        try {
+            const data = JSON.parse(content);
+            isSyncing = true;
+            try {
+                if (data.port && document.getElementById("input-port")) {
+                    document.getElementById("input-port").value = data.port;
+                }
+                if (data.context && document.getElementById("input-context")) {
+                    document.getElementById("input-context").value = data.context;
+                }
+                if (data.threads && document.getElementById("input-threads")) {
+                    document.getElementById("input-threads").value = data.threads;
+                }
+                if (data.engine && document.getElementById("select-engine")) {
+                    document.getElementById("select-engine").value = data.engine;
+                    handleEngineUI(data.engine);
+                }
+                if (data.ngl !== undefined && document.getElementById("input-ngl")) {
+                    document.getElementById("input-ngl").value = data.ngl;
+                }
+                if (data.flash_attn !== undefined && document.getElementById("check-flash-attn")) {
+                    document.getElementById("check-flash-attn").checked = !!data.flash_attn;
+                }
+                const checkPq = document.getElementById("check-pq-enable");
+                const selectPq = document.getElementById("select-pq-mode");
+                const modeGroup = document.getElementById("pq-mode-group");
+                if (data.cache_type_k && checkPq && selectPq) {
+                    const ck = data.cache_type_k.toLowerCase();
+                    if (ck !== "f16" && ck !== "none") {
+                        checkPq.checked = true;
+                        if (modeGroup) modeGroup.style.display = "flex";
+                        if (ck.includes("q3_k")) selectPq.value = "4";
+                        else if (ck.includes("q4_0")) selectPq.value = "1";
+                        else if (ck.includes("q5_0")) selectPq.value = "5";
+                        else if (ck.includes("q6_k")) selectPq.value = "6";
+                        else if (ck.includes("q8_0")) selectPq.value = "2";
+                        else selectPq.value = "1";
+                    } else {
+                        checkPq.checked = false;
+                        if (modeGroup) modeGroup.style.display = "none";
+                    }
+                }
+                if (data.temp !== undefined && document.getElementById("input-temp")) {
+                    document.getElementById("input-temp").value = data.temp;
+                }
+                if (data.top_p !== undefined && document.getElementById("input-topp")) {
+                    document.getElementById("input-topp").value = data.top_p;
+                }
+                if (data.top_k !== undefined && document.getElementById("input-topk")) {
+                    document.getElementById("input-topk").value = data.top_k;
+                }
+                if (data.min_p !== undefined && document.getElementById("input-minp")) {
+                    document.getElementById("input-minp").value = data.min_p;
+                }
+                markBatPendingChanges();
+                return;
+            } finally {
+                isSyncing = false;
+            }
+        } catch (e) {
+            // User still typing JSON, ignore syntax errors temporarily
+        }
+    }
 
     isSyncing = true;
     try {
@@ -448,6 +597,7 @@ function syncBatEditorToUI() {
     }
 }
 
+
 /**
  * Toggles visibility of the raw .BAT editor textarea.
  */
@@ -500,15 +650,16 @@ async function saveBatScript() {
 
             const backupPill = document.getElementById("lbl-bat-backup-status");
             if (backupPill) {
-                backupPill.innerText = "Backup: .bat.bak existe";
+                const ext = (currentBatchDetails.filename && currentBatchDetails.filename.endsWith(".json")) ? ".json" : ".bat";
+                backupPill.innerText = `Backup: ${ext}.bak existe`;
                 backupPill.style.color = "var(--accent-emerald)";
             }
 
             if (saveResult) {
-                saveResult.innerText = "✅ Guardado exitoso con respaldo .bak";
+                saveResult.innerText = "✅ Guardado (.json y .bat sincronizados)";
                 saveResult.style.color = "var(--accent-emerald)";
             }
-            appendLogLine(`[SUCCESS] Script ${currentBatchDetails.filename} guardado con respaldo .bat.bak.`);
+            appendLogLine(`[SUCCESS] Configuración ${currentBatchDetails.filename} guardada (.json y .bat sincronizados).`);
         } else {
             if (saveResult) {
                 saveResult.innerText = `❌ Error: ${res.error}`;
@@ -565,8 +716,10 @@ async function onEngineOrPqChange() {
     const pq_enabled = document.getElementById("check-pq-enable").checked;
     const pq_choice = pq_enabled ? document.getElementById("select-pq-mode").value : "3";
 
+    handleEngineUI(engine);
+
     if (currentBatchDetails) {
-        // In Batch Runner mode, preserve model-calibrated context/ngl, only sync KV cache compression
+        // In Batch Runner mode, preserve model-calibrated context/ngl (or 0 for CPU), sync KV cache compression
         syncUItoBatEditor();
         return;
     }
@@ -669,12 +822,13 @@ async function toggleServer() {
 
             const port = parseInt(document.getElementById("input-port").value) || currentBatchDetails.port || 8080;
             const modelLabel = currentBatchDetails.model_info ? currentBatchDetails.model_info.concatenated_label : currentBatchDetails.filename;
+            const launchPath = currentBatchDetails.bat_path || (currentBatchDetails.path && currentBatchDetails.path.endsWith(".json") ? currentBatchDetails.path.replace(/\.json$/i, ".bat") : currentBatchDetails.path);
 
-            appendLogLine(`[SYSTEM] Lanzando script .bat: ${currentBatchDetails.filename} (${modelLabel}) en puerto ${port}...`);
+            appendLogLine(`[SYSTEM] Lanzando servidor: ${currentBatchDetails.filename} (${modelLabel}) en puerto ${port}...`);
             setButtonState("loading");
 
             try {
-                const res = await api.launch_batch_script(currentBatchDetails.path, port);
+                const res = await api.launch_batch_script(launchPath, port);
                 if (res.success) {
                     appendLogLine(`[SYSTEM] ${res.message}`);
                 } else {

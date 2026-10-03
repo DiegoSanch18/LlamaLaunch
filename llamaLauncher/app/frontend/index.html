@@ -155,28 +155,29 @@
                             </div>
                         </div>
 
-                        <!-- Batch Script Raw Editor Toggle -->
+                        <!-- Configuration Raw Editor Toggle -->
                         <div class="bat-editor-toggle-row">
                             <button type="button" class="btn-secondary bat-toggle-btn" id="btn-toggle-bat" onclick="toggleBatEditor()">
-                                <span>📝 Ver / Editar Script .BAT</span>
+                                <span>📝 Ver / Editar Configuración (.JSON / .BAT)</span>
                                 <span id="bat-editor-chevron">▼</span>
                             </button>
                         </div>
 
-                        <!-- Raw Batch Script Editor Area -->
+                        <!-- Raw Configuration Editor Area -->
                         <div id="bat-editor-container" class="bat-editor-container" style="display: none;">
                             <div class="bat-editor-header">
-                                <span class="info-label" id="lbl-bat-filename">script.bat</span>
-                                <span class="bat-backup-pill" id="lbl-bat-backup-status">Auto-backup .bat.bak</span>
+                                <span class="info-label" id="lbl-bat-filename">config.json</span>
+                                <span class="bat-backup-pill" id="lbl-bat-backup-status">Auto-backup .json.bak</span>
                             </div>
-                            <textarea id="editor-bat-content" class="bat-textarea" rows="11" spellcheck="false" placeholder="Cargando script .bat..."></textarea>
+                            <textarea id="editor-bat-content" class="bat-textarea" rows="11" spellcheck="false" placeholder="Cargando configuración .json..."></textarea>
                             <div class="bat-editor-actions">
                                 <span id="lbl-bat-save-result" class="bat-save-msg"></span>
                                 <button type="button" class="btn-secondary btn-save-bat" id="btn-save-bat" onclick="saveBatScript()">
-                                    💾 Guardar .BAT
+                                    💾 Guardar Configuración (.JSON)
                                 </button>
                             </div>
                         </div>
+
 
                         <div class="action-zone">
                             <button id="btn-toggle-server" class="btn-primary start" onclick="toggleServer()">

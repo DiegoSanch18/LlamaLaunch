@@ -219,9 +219,8 @@ class ApiBridge:
 
     def get_model_batch_details(self, model_id: str) -> Dict[str, Any]:
         """
-        Gets the .bat configuration for a selected model (Combobox handler).
-        If the model already has a .bat script, parses its settings.
-        If no .bat exists, auto-generates a calibrated .bat template and parses it.
+        Gets the model configuration for a selected model (Combobox handler).
+        Prioritizes structured .json configuration files, auto-converting from .bat if needed.
         Also resolves the active binary (dedicated priority + generic fallback).
         """
         try:
@@ -237,13 +236,24 @@ class ApiBridge:
 
             folder = Path(target_model["folder_path"])
             is_newly_generated = False
+            json_path = None
             bat_path = None
 
-            # 1. Check existing batch scripts
-            if target_model.get("batch_scripts"):
+            # 1. Prioritize existing .json configuration files
+            if target_model.get("config_files"):
+                json_path = Path(target_model["config_files"][0]["path"])
+                if not json_path.exists():
+                    json_path = None
+
+            # 2. Check existing batch scripts and convert to .json if needed
+            if not json_path and target_model.get("batch_scripts"):
                 bat_path = Path(target_model["batch_scripts"][0]["path"])
-            else:
-                # 2. Auto-generate a calibrated .bat template
+                conv = batch_manager.convert_bat_to_json(bat_path, overwrite=False)
+                if conv.get("success"):
+                    json_path = Path(conv["json_path"])
+
+            # 3. If neither exists, auto-generate calibrated .bat and .json templates
+            if not json_path:
                 weights = target_model.get("weights", [])
                 if not weights:
                     return {"success": False, "error": "No model weights found to generate batch script."}
@@ -266,16 +276,28 @@ class ApiBridge:
                 save_res = batch_manager.save_batch_script(bat_path, content, create_backup=False)
                 if not save_res.get("success"):
                     return save_res
+
+                conv = batch_manager.convert_bat_to_json(bat_path, overwrite=True)
+                if conv.get("success"):
+                    json_path = Path(conv["json_path"])
                 is_newly_generated = True
 
-            # 3. Parse batch configuration
-            parsed = batch_manager.parse_batch_script(bat_path)
+            # 4. Parse JSON configuration
+            if json_path and json_path.exists():
+                parsed = batch_manager.parse_json_config(json_path)
+            elif bat_path and bat_path.exists():
+                parsed = batch_manager.parse_batch_script(bat_path)
+            else:
+                return {"success": False, "error": "Could not resolve configuration file for model."}
             
-            # 4. Binary resolution
+            # 5. Binary resolution based on configured engine
+            configured_engine = parsed.get("engine", "CUDA")
+            dev_type = "CPU" if configured_engine == "CPU" else ("VULKAN" if configured_engine == "VULKAN" else "CUDA")
+
             bin_res = binaries.resolve_model_binary(
                 model_folder=folder,
                 bin_root=self.bin_root,
-                dev_type="CUDA"
+                dev_type=dev_type
             )
 
             parsed["is_newly_generated"] = is_newly_generated
@@ -285,27 +307,48 @@ class ApiBridge:
         except Exception as e:
             return {"success": False, "error": f"Error loading model batch: {str(e)}"}
 
-    def save_batch_script(self, bat_path: str, raw_content: str, create_backup: bool = True) -> Dict[str, Any]:
+    def save_batch_script(self, config_path: str, raw_content: str, create_backup: bool = True) -> Dict[str, Any]:
         """
-        Saves updated content to a .bat script with automatic .bat.bak backup.
-        Also re-parses the configuration so the caller receives the updated settings.
+        Saves updated content to a .json or .bat configuration with automatic backup.
+        Automatically keeps both .json and .bat synchronized.
         """
         try:
-            res = batch_manager.save_batch_script(Path(bat_path), raw_content, create_backup=create_backup)
-            if res.get("success"):
-                res["parsed_config"] = batch_manager.parse_batch_script(Path(bat_path))
-            return res
+            p = Path(config_path)
+            if p.suffix.lower() == ".json":
+                res = batch_manager.save_json_config(p, raw_content, create_backup=create_backup, sync_bat=True)
+                return res
+            elif p.suffix.lower() == ".bat":
+                res = batch_manager.save_batch_script(p, raw_content, create_backup=create_backup)
+                if res.get("success"):
+                    # Also update/sync .json
+                    batch_manager.convert_bat_to_json(p, overwrite=True)
+                    res["parsed_config"] = batch_manager.parse_batch_script(p)
+                return res
+            else:
+                return {"success": False, "error": f"Unsupported configuration format: {p.suffix}"}
         except Exception as e:
-            return {"success": False, "error": f"Error saving batch script: {str(e)}"}
+            return {"success": False, "error": f"Error saving configuration: {str(e)}"}
+
+    def save_model_config(self, config_path: str, raw_content: str, create_backup: bool = True) -> Dict[str, Any]:
+        """Alias for save_batch_script with generic configuration semantics."""
+        return self.save_batch_script(config_path, raw_content, create_backup=create_backup)
 
     def launch_batch_script(self, bat_path: str, port: int = 8080) -> Dict[str, Any]:
         """
         Launches a model's .bat script directly as a supervised subprocess group.
+        Accepts either a .bat path or a .json configuration path.
         """
         try:
-            res = self.manager.start_batch_server(Path(bat_path), port=port, logs_dir=self.logs_dir)
+            p = Path(bat_path)
+            if p.suffix.lower() == ".json":
+                bat_candidate = p.with_suffix(".bat")
+                if bat_candidate.exists():
+                    p = bat_candidate
+                else:
+                    return {"success": False, "message": f"Associated batch script not found for {bat_path}"}
+            res = self.manager.start_batch_server(p, port=port, logs_dir=self.logs_dir)
             if res.get("success"):
-                self._record_model_usage(Path(bat_path).name)
+                self._record_model_usage(p.name)
             return res
         except Exception as e:
             return {"success": False, "message": f"Error launching batch script: {str(e)}"}

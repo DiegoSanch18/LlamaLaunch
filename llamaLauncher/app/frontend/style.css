@@ -342,6 +342,27 @@ select option {
     color: var(--accent-blue);
 }
 
+.binary-status-badge.cpu {
+    background-color: rgba(148, 163, 184, 0.15);
+    border-color: rgba(148, 163, 184, 0.4);
+    color: #94a3b8;
+}
+
+.binary-status-badge.vulkan {
+    background-color: rgba(245, 158, 11, 0.15);
+    border-color: rgba(245, 158, 11, 0.4);
+    color: var(--accent-amber);
+}
+
+input:disabled, select:disabled, textarea:disabled {
+    opacity: 0.45;
+    cursor: not-allowed !important;
+    background-color: rgba(15, 23, 42, 0.6) !important;
+    border-color: rgba(255, 255, 255, 0.08) !important;
+    color: var(--text-muted) !important;
+}
+
+
 /* Batch Script Editor Component */
 .bat-editor-toggle-row {
     margin-top: 4px;

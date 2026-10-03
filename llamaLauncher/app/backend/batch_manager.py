@@ -8,9 +8,10 @@ for local LLM inference models in G:\\My Drive\\AI Local\\models.
 import os
 import re
 import sys
+import json
 import shutil
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 def parse_batch_script(bat_path: Path) -> Dict[str, Any]:
     """
@@ -112,7 +113,41 @@ def parse_batch_script(bat_path: Path) -> Dict[str, Any]:
     if m_alias:
         config["alias"] = m_alias.group(1)
 
+    # Ubatch size
+    m_ub = re.search(r'--ubatch-size\s+(\d+)', content)
+    if m_ub:
+        config["ubatch_size"] = int(m_ub.group(1))
+    else:
+        config["ubatch_size"] = 512
+
+    # Repeat penalty
+    m_rp = re.search(r'--repeat-penalty\s+([0-9.]+)', content)
+    if m_rp:
+        config["repeat_penalty"] = float(m_rp.group(1))
+
+    # Speculative MTP
+    m_st = re.search(r'--spec-type\s+([a-zA-Z0-9_\-]+)', content)
+    if m_st:
+        config["spec_type"] = m_st.group(1)
+
+    m_sdm = re.search(r'--spec-draft-model\s+["\']?([^"\'\r\n]+)["\']?', content)
+    if m_sdm:
+        config["spec_draft_model"] = Path(m_sdm.group(1).replace("%BASEDIR%", "").strip()).name
+
+    m_sdn = re.search(r'--spec-draft-n-max\s+(\d+)', content)
+    if m_sdn:
+        config["spec_draft_n_max"] = int(m_sdn.group(1))
+
+    m_sdp = re.search(r'--spec-draft-p-min\s+([0-9.]+)', content)
+    if m_sdp:
+        config["spec_draft_p_min"] = float(m_sdp.group(1))
+
+    m_ngld = re.search(r'--n-gpu-layers-draft\s+([a-zA-Z0-9_]+)', content)
+    if m_ngld:
+        config["n_gpu_layers_draft"] = m_ngld.group(1)
+
     return config
+
 
 def update_batch_script_content(content: str, updates: Dict[str, Any]) -> str:
     """
@@ -351,3 +386,214 @@ def save_batch_script(bat_path: Path, content: str, create_backup: bool = True) 
             "success": False,
             "error": f"Failed to save script: {str(e)}"
         }
+
+
+def bat_to_json_dict(bat_path: Path) -> Dict[str, Any]:
+    """
+    Parses a .bat script and converts its configuration into a clean JSON dictionary.
+    """
+    parsed = parse_batch_script(bat_path)
+    if not parsed.get("success", False):
+        return parsed
+
+    ngl = parsed.get("ngl", 99)
+    engine = "CPU" if ngl == 0 else "CUDA"
+
+    folder = bat_path.parent
+    if folder.parent.name and folder.parent.name.lower() != "models":
+        name = f"{folder.parent.name} — {folder.name}"
+    else:
+        name = folder.name
+
+    json_dict: Dict[str, Any] = {
+        "name": name,
+        "alias": parsed.get("alias", ""),
+        "model_file": parsed.get("model_file", ""),
+        "mmproj_file": parsed.get("mmproj_file", ""),
+        "engine": engine,
+        "ngl": ngl,
+        "threads": parsed.get("threads", 8),
+        "context": parsed.get("context", 8192),
+        "ubatch_size": parsed.get("ubatch_size", 512),
+        "flash_attn": parsed.get("flash_attn", True if engine != "CPU" else False),
+        "cache_type_k": parsed.get("cache_type_k", "q4_0"),
+        "cache_type_v": parsed.get("cache_type_v", "q4_0"),
+        "temp": parsed.get("temp", 0.7),
+        "top_p": parsed.get("top_p", 0.95),
+        "top_k": parsed.get("top_k", 40),
+        "min_p": parsed.get("min_p", 0.05),
+        "repeat_penalty": parsed.get("repeat_penalty", 1.0),
+        "host": parsed.get("host", "0.0.0.0"),
+        "port": parsed.get("port", 8080),
+        "associated_bat": bat_path.name
+    }
+
+    if parsed.get("spec_type"):
+        json_dict["spec_type"] = parsed.get("spec_type")
+        json_dict["spec_draft_model"] = parsed.get("spec_draft_model", "")
+        if parsed.get("spec_draft_n_max") is not None:
+            json_dict["spec_draft_n_max"] = parsed.get("spec_draft_n_max")
+        if parsed.get("spec_draft_p_min") is not None:
+            json_dict["spec_draft_p_min"] = parsed.get("spec_draft_p_min")
+        json_dict["n_gpu_layers_draft"] = parsed.get("n_gpu_layers_draft", "all")
+
+    return json_dict
+
+
+def convert_bat_to_json(bat_path: Path, overwrite: bool = True) -> Dict[str, Any]:
+    """
+    Converts a single .bat file to a corresponding .json file right next to it.
+    """
+    json_path = bat_path.with_suffix(".json")
+    if json_path.exists() and not overwrite:
+        return {"success": True, "json_path": str(json_path), "skipped": True}
+
+    data = bat_to_json_dict(bat_path)
+    if not data or (not data.get("model_file") and "error" in data):
+        return {"success": False, "error": data.get("error", "Failed to parse batch script")}
+
+    try:
+        json_str = json.dumps(data, indent=2, ensure_ascii=False)
+        json_path.write_text(json_str, encoding="utf-8")
+        return {"success": True, "json_path": str(json_path), "data": data}
+    except Exception as e:
+        return {"success": False, "error": f"Failed to write json: {e}"}
+
+
+def parse_json_config(json_path: Path) -> Dict[str, Any]:
+    """
+    Parses a model .json configuration file and returns a dictionary compatible
+    with frontend expectations.
+    """
+    if not json_path.exists() or not json_path.is_file():
+        return {"success": False, "error": f"JSON config not found: {json_path}"}
+
+    try:
+        content = json_path.read_text(encoding="utf-8", errors="replace")
+        data = json.loads(content)
+    except Exception as e:
+        return {"success": False, "error": f"Failed to parse JSON file: {e}"}
+
+    has_backup = json_path.with_suffix(".json.bak").exists()
+    associated_bat = json_path.with_suffix(".bat")
+    bat_raw = ""
+    if associated_bat.exists():
+        try:
+            bat_raw = associated_bat.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+    ngl = data.get("ngl", data.get("n_gpu_layers", 99))
+    engine = data.get("engine", "CPU" if ngl == 0 else "CUDA")
+
+    config: Dict[str, Any] = {
+        "success": True,
+        "config_format": "JSON",
+        "path": str(json_path),
+        "json_path": str(json_path),
+        "bat_path": str(associated_bat) if associated_bat.exists() else None,
+        "filename": json_path.name,
+        "has_backup": has_backup,
+        "raw_content": json.dumps(data, indent=2, ensure_ascii=False),
+        "bat_raw_content": bat_raw,
+        "port": data.get("port", 8080),
+        "host": data.get("host", "0.0.0.0"),
+        "threads": data.get("threads", 8),
+        "context": data.get("context", data.get("ctx_size", 8192)),
+        "ngl": ngl,
+        "engine": engine,
+        "ubatch_size": data.get("ubatch_size", 512),
+        "flash_attn": data.get("flash_attn", True if engine != "CPU" else False),
+        "cache_type_k": data.get("cache_type_k", "q4_0"),
+        "cache_type_v": data.get("cache_type_v", "q4_0"),
+        "temp": data.get("temp", 0.7),
+        "top_p": data.get("top_p", 0.95),
+        "top_k": data.get("top_k", 40),
+        "min_p": data.get("min_p", 0.05),
+        "repeat_penalty": data.get("repeat_penalty", 1.0),
+        "model_file": data.get("model_file", ""),
+        "mmproj_file": data.get("mmproj_file", ""),
+        "alias": data.get("alias", ""),
+        "spec_type": data.get("spec_type", ""),
+        "spec_draft_model": data.get("spec_draft_model", ""),
+        "spec_draft_n_max": data.get("spec_draft_n_max", None),
+        "spec_draft_p_min": data.get("spec_draft_p_min", None),
+        "n_gpu_layers_draft": data.get("n_gpu_layers_draft", "")
+    }
+    return config
+
+
+def save_json_config(
+    json_path: Path, 
+    content_or_dict: Any, 
+    create_backup: bool = True, 
+    sync_bat: bool = True
+) -> Dict[str, Any]:
+    """
+    Persists configuration to a .json file with optional backup and automatic synchronization
+    to the matching .bat file.
+    """
+    try:
+        json_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if isinstance(content_or_dict, str):
+            data = json.loads(content_or_dict)
+        elif isinstance(content_or_dict, dict):
+            data = content_or_dict
+        else:
+            return {"success": False, "error": f"Invalid content type: {type(content_or_dict)}"}
+
+        backup_created = False
+        backup_path = json_path.with_suffix(".json.bak")
+        if create_backup and json_path.exists():
+            shutil.copy2(json_path, backup_path)
+            backup_created = True
+
+        formatted_json = json.dumps(data, indent=2, ensure_ascii=False)
+        json_path.write_text(formatted_json, encoding="utf-8")
+
+        # Sync to corresponding .bat if requested
+        bat_synced = False
+        bat_path = json_path.with_suffix(".bat")
+        if sync_bat:
+            if bat_path.exists():
+                try:
+                    bat_content = bat_path.read_text(encoding="utf-8", errors="replace")
+                    updated_bat = update_batch_script_content(bat_content, data)
+                    save_batch_script(bat_path, updated_bat, create_backup=create_backup)
+                    bat_synced = True
+                except Exception as e:
+                    print(f"[WARN] Failed to sync .bat from JSON: {e}")
+
+        return {
+            "success": True,
+            "path": str(json_path),
+            "backup_created": backup_created,
+            "backup_path": str(backup_path) if backup_created else None,
+            "bat_synced": bat_synced,
+            "parsed_config": parse_json_config(json_path)
+        }
+    except Exception as e:
+        return {"success": False, "error": f"Failed to save JSON config: {e}"}
+
+
+def migrate_all_bats_to_json(models_root: Path) -> List[Dict[str, Any]]:
+    """
+    Discovers every .bat file under models_root and generates a corresponding .json file.
+    """
+    results = []
+    if not models_root.exists():
+        return results
+
+    for bat in models_root.rglob("*.bat"):
+        if bat.name.endswith(".bak"):
+            continue
+        res = convert_bat_to_json(bat, overwrite=True)
+        results.append({
+            "bat": str(bat),
+            "json": str(bat.with_suffix(".json")),
+            "success": res.get("success", False),
+            "error": res.get("error", None)
+        })
+    return results
+

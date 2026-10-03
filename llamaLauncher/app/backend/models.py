@@ -317,7 +317,33 @@ def scan_models_and_batches(models_root: Optional[Path] = None) -> Dict[str, Any
             if not weights:
                 continue
 
-            # 2. Collect Batch Scripts (*.bat / *.cmd, excluding *.bak)
+            # 2. Collect Configuration Files (*.json and *.bat)
+            config_files: List[Dict[str, Any]] = []
+            for j in sorted(d.glob("*.json")):
+                if j.name.endswith(".bak") or j.name in ("history.json", "manifest.json"):
+                    continue
+                has_bak = j.with_suffix(".json.bak").exists() or Path(str(j) + ".bak").exists()
+                mtime_str = datetime.fromtimestamp(j.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+                config_files.append({
+                    "filename": j.name,
+                    "path": str(j),
+                    "has_backup": has_bak,
+                    "last_modified": mtime_str
+                })
+
+            if not config_files and d != family_dir:
+                for j in sorted(family_dir.glob("*.json")):
+                    if j.name.endswith(".bak") or j.name in ("history.json", "manifest.json"):
+                        continue
+                    has_bak = j.with_suffix(".json.bak").exists() or Path(str(j) + ".bak").exists()
+                    mtime_str = datetime.fromtimestamp(j.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+                    config_files.append({
+                        "filename": j.name,
+                        "path": str(j),
+                        "has_backup": has_bak,
+                        "last_modified": mtime_str
+                    })
+
             batch_scripts: List[Dict[str, Any]] = []
             for b in sorted(d.glob("*.bat")):
                 if b.name.endswith(".bak"):
@@ -346,6 +372,7 @@ def scan_models_and_batches(models_root: Optional[Path] = None) -> Dict[str, Any
                     })
 
             default_batch = batch_scripts[0]["filename"] if batch_scripts else None
+            default_config = config_files[0]["filename"] if config_files else default_batch
 
             # 3. Dedicated Binary Resolution
             has_ded_bin, ded_bin_path, ded_bin_dir = _resolve_dedicated_binary(d, family_dir)
@@ -366,10 +393,13 @@ def scan_models_and_batches(models_root: Optional[Path] = None) -> Dict[str, Any
                 "weights": weights,
                 "mmproj": mmproj,
                 "mtp": mtp,
+                "config_files": config_files,
                 "batch_scripts": batch_scripts,
+                "default_config": default_config,
                 "default_batch": default_batch,
                 "last_used": "Never"
             })
+
 
     # Sort models by concatenated label
     model_units.sort(key=lambda m: m["concatenated_label"].lower())
