@@ -154,9 +154,16 @@ def parse_batch_script(bat_path: Path) -> Dict[str, Any]:
     if m_st:
         config["spec_type"] = m_st.group(1)
 
+    m_mtp_var = re.search(r'set\s+["\']?MTP_MODEL=(?:%BASEDIR%)?([^"\'\r\n]+)', content, re.IGNORECASE)
     m_sdm = re.search(r'--spec-draft-model\s+["\']?([^"\'\r\n]+)["\']?', content)
     if m_sdm:
-        config["spec_draft_model"] = Path(m_sdm.group(1).replace("%BASEDIR%", "").strip()).name
+        raw_sdm = m_sdm.group(1).replace("%BASEDIR%", "").strip()
+        if "%MTP_MODEL%" in raw_sdm.upper() and m_mtp_var:
+            config["spec_draft_model"] = Path(m_mtp_var.group(1).strip()).name
+        else:
+            config["spec_draft_model"] = Path(raw_sdm).name
+    elif m_mtp_var and m_st:
+        config["spec_draft_model"] = Path(m_mtp_var.group(1).strip()).name
 
     m_sdn = re.search(r'--spec-draft-n-max\s+(\d+)', content)
     if m_sdn:
@@ -169,6 +176,23 @@ def parse_batch_script(bat_path: Path) -> Dict[str, Any]:
     m_ngld = re.search(r'--n-gpu-layers-draft\s+([a-zA-Z0-9_]+)', content)
     if m_ngld:
         config["n_gpu_layers_draft"] = m_ngld.group(1)
+
+    # Available MTP detection in folder
+    available_mtp = config.get("spec_draft_model", "")
+    if not available_mtp or not (bat_path.parent / available_mtp).exists():
+        available_mtp = ""
+        try:
+            for f in bat_path.parent.glob("*mtp*.gguf"):
+                available_mtp = f.name
+                break
+            if not available_mtp:
+                for f in bat_path.parent.glob("*draft*.gguf"):
+                    available_mtp = f.name
+                    break
+        except Exception:
+            pass
+    config["available_mtp"] = available_mtp
+    config["mtp_enabled"] = bool(config.get("spec_draft_model") and config.get("spec_type"))
 
     return config
 
@@ -344,6 +368,59 @@ def update_batch_script_content(content: str, updates: Dict[str, Any]) -> str:
                 updated = re.sub(r'set\s+["\']?MMPROJ=[^\r\n]*', 'set "MMPROJ="', updated, flags=re.IGNORECASE)
             if re.search(r'set\s+["\']?MMPROJ_FLAG=.*', updated, re.IGNORECASE):
                 updated = re.sub(r'set\s+["\']?MMPROJ_FLAG=[^\r\n]*', 'set "MMPROJ_FLAG="', updated, flags=re.IGNORECASE)
+
+    # Multi Token Prediction (MTP) Speculative Decoding
+    if "spec_draft_model" in updates or "spec_type" in updates or "mtp_enabled" in updates:
+        spec_model = updates.get("spec_draft_model", "")
+        spec_type = updates.get("spec_type", "draft-mtp" if spec_model else "")
+        mtp_enabled = updates.get("mtp_enabled")
+        if mtp_enabled is None:
+            mtp_enabled = bool(spec_model and spec_type)
+
+        if mtp_enabled and spec_model:
+            model_name = Path(spec_model.replace("%BASEDIR%", "").strip()).name
+            # If script uses set "MTP_MODEL=..."
+            if re.search(r'set\s+["\']?MTP_MODEL=.*', updated, re.IGNORECASE):
+                updated = re.sub(r'set\s+["\']?MTP_MODEL=[^\r\n]*', f'set "MTP_MODEL=%BASEDIR%{model_name}"', updated, flags=re.IGNORECASE)
+
+            # Update or insert flags
+            if re.search(r'--spec-draft-model\s+["\']?[^"\'\r\n]+["\']?', updated):
+                if not re.search(r'--spec-draft-model\s+["\']?%MTP_MODEL%["\']?', updated):
+                    updated = re.sub(r'--spec-draft-model\s+["\']?[^"\'\r\n]+["\']?', f'--spec-draft-model    "%BASEDIR%{model_name}"', updated)
+            else:
+                m_anchor = re.search(r'(!MMPROJ_FLAG!\s*\^|--model\s+["\'][^"\']+["\']\s*\^|--model\s+\S+\s*\^)', updated)
+                if m_anchor:
+                    n_max = updates.get("spec_draft_n_max", 2)
+                    p_min = updates.get("spec_draft_p_min", 0.5)
+                    draft_ngl = updates.get("n_gpu_layers_draft", "all")
+                    spec_flags = (
+                        f"\r\n  --spec-type           {spec_type or 'draft-mtp'}     ^"
+                        f"\r\n  --spec-draft-model    \"%BASEDIR%{model_name}\" ^"
+                        f"\r\n  --spec-draft-n-max    {n_max}             ^"
+                        f"\r\n  --spec-draft-p-min    {p_min}           ^"
+                        f"\r\n  --n-gpu-layers-draft  {draft_ngl}           ^"
+                    )
+                    updated = updated[:m_anchor.end()] + spec_flags + updated[m_anchor.end():]
+
+            if re.search(r'--spec-type\s+[a-zA-Z0-9_\-]+', updated):
+                updated = re.sub(r'--spec-type\s+[a-zA-Z0-9_\-]+', f'--spec-type           {spec_type or "draft-mtp"}', updated)
+
+            # Update echo header if present
+            if re.search(r'echo\s+Modelo Borrador\s*:.*', updated):
+                updated = re.sub(r'echo\s+Modelo Borrador\s*:.*', f'echo  Modelo Borrador : {model_name} (MTP Draft)', updated)
+        else:
+            # MTP disabled: clear variable and remove inline flags
+            if re.search(r'set\s+["\']?MTP_MODEL=.*', updated, re.IGNORECASE):
+                updated = re.sub(r'set\s+["\']?MTP_MODEL=[^\r\n]*', 'set "MTP_MODEL="', updated, flags=re.IGNORECASE)
+
+            updated = re.sub(r'\r?\n\s*--spec-type\s+[^\r\n]+\s*\^', '', updated)
+            updated = re.sub(r'\r?\n\s*--spec-draft-model\s+[^\r\n]+\s*\^', '', updated)
+            updated = re.sub(r'\r?\n\s*--spec-draft-n-max\s+[^\r\n]+\s*\^', '', updated)
+            updated = re.sub(r'\r?\n\s*--spec-draft-p-min\s+[^\r\n]+\s*\^', '', updated)
+            updated = re.sub(r'\r?\n\s*--n-gpu-layers-draft\s+[^\r\n]+\s*\^', '', updated)
+
+            if re.search(r'echo\s+Modelo Borrador\s*:.*', updated):
+                updated = re.sub(r'echo\s+Modelo Borrador\s*:.*', 'echo  Modelo Borrador : Desactivado', updated)
 
     return updated
 
@@ -538,14 +615,16 @@ def bat_to_json_dict(bat_path: Path) -> Dict[str, Any]:
         "associated_bat": bat_path.name
     }
 
-    if parsed.get("spec_type"):
-        json_dict["spec_type"] = parsed.get("spec_type")
-        json_dict["spec_draft_model"] = parsed.get("spec_draft_model", "")
-        if parsed.get("spec_draft_n_max") is not None:
-            json_dict["spec_draft_n_max"] = parsed.get("spec_draft_n_max")
-        if parsed.get("spec_draft_p_min") is not None:
-            json_dict["spec_draft_p_min"] = parsed.get("spec_draft_p_min")
+    spec_draft = parsed.get("spec_draft_model", "")
+    if parsed.get("spec_type") or spec_draft:
+        json_dict["spec_type"] = parsed.get("spec_type", "draft-mtp")
+        json_dict["spec_draft_model"] = spec_draft
+        json_dict["spec_draft_n_max"] = parsed.get("spec_draft_n_max", 2)
+        json_dict["spec_draft_p_min"] = parsed.get("spec_draft_p_min", 0.5)
         json_dict["n_gpu_layers_draft"] = parsed.get("n_gpu_layers_draft", "all")
+    else:
+        json_dict["spec_type"] = ""
+        json_dict["spec_draft_model"] = ""
 
     return json_dict
 
@@ -609,6 +688,39 @@ def parse_json_config(json_path: Path) -> Dict[str, Any]:
         except Exception:
             pass
 
+    # Resolve Multi Token Prediction (MTP) draft model
+    spec_draft_model = data.get("spec_draft_model", "")
+    if "%MTP_MODEL%" in spec_draft_model.upper():
+        spec_draft_model = ""
+
+    if spec_draft_model and not (json_path.parent / spec_draft_model).exists():
+        spec_draft_model = ""
+
+    available_mtp = spec_draft_model
+    if not available_mtp and bat_raw:
+        m_mtp_var = re.search(r'set\s+["\']?MTP_MODEL=(?:%BASEDIR%)?([^"\'\r\n]+)', bat_raw, re.IGNORECASE)
+        if m_mtp_var:
+            cand = Path(m_mtp_var.group(1).strip()).name
+            if (json_path.parent / cand).exists():
+                available_mtp = cand
+
+    if not available_mtp:
+        try:
+            for f in json_path.parent.glob("*mtp*.gguf"):
+                available_mtp = f.name
+                break
+            if not available_mtp:
+                for f in json_path.parent.glob("*draft*.gguf"):
+                    available_mtp = f.name
+                    break
+        except Exception:
+            pass
+
+    if data.get("spec_type") and not spec_draft_model and available_mtp:
+        spec_draft_model = available_mtp
+
+    mtp_enabled = bool(spec_draft_model and data.get("spec_type"))
+
     config: Dict[str, Any] = {
         "success": True,
         "config_format": "JSON",
@@ -639,11 +751,13 @@ def parse_json_config(json_path: Path) -> Dict[str, Any]:
         "available_mmproj": available_mmproj,
         "vision_enabled": bool(mmproj_file),
         "alias": data.get("alias", ""),
-        "spec_type": data.get("spec_type", ""),
-        "spec_draft_model": data.get("spec_draft_model", ""),
-        "spec_draft_n_max": data.get("spec_draft_n_max", None),
-        "spec_draft_p_min": data.get("spec_draft_p_min", None),
-        "n_gpu_layers_draft": data.get("n_gpu_layers_draft", "")
+        "spec_type": data.get("spec_type", "draft-mtp" if spec_draft_model else ""),
+        "spec_draft_model": spec_draft_model,
+        "available_mtp": available_mtp,
+        "mtp_enabled": mtp_enabled,
+        "spec_draft_n_max": data.get("spec_draft_n_max", 2),
+        "spec_draft_p_min": data.get("spec_draft_p_min", 0.5),
+        "n_gpu_layers_draft": data.get("n_gpu_layers_draft", "all")
     }
     return config
 

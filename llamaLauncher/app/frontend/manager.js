@@ -222,6 +222,41 @@ async function onBatchModelChange() {
                 }
             }
 
+            // Multi Token Prediction (MTP) Checkbox State
+            const checkMtp = document.getElementById("check-mtp");
+            const lblMtp = document.getElementById("lbl-mtp-file");
+
+            let mtpFile = "";
+            if (details.model_info && details.model_info.mtp && details.model_info.mtp.length > 0) {
+                mtpFile = details.model_info.mtp[0].filename;
+            } else if (details.available_mtp) {
+                mtpFile = details.available_mtp;
+            } else if (details.spec_draft_model && details.spec_draft_model.trim() !== "" && details.spec_draft_model !== "None" && !details.spec_draft_model.includes("%")) {
+                mtpFile = details.spec_draft_model;
+            }
+
+            if (checkMtp && lblMtp) {
+                if (mtpFile) {
+                    checkMtp.disabled = false;
+                    checkMtp.dataset.availableFile = mtpFile;
+                    const isMtpActive = !!(details.spec_draft_model && details.spec_draft_model.trim() !== "" && details.spec_draft_model !== "None" && (details.spec_type === "draft-mtp" || details.mtp_enabled));
+                    checkMtp.checked = isMtpActive;
+                    if (isMtpActive) {
+                        lblMtp.innerText = `(${mtpFile})`;
+                        lblMtp.style.color = "var(--accent-emerald)";
+                    } else {
+                        lblMtp.innerText = `(${mtpFile} — Desactivado)`;
+                        lblMtp.style.color = "var(--text-muted)";
+                    }
+                } else {
+                    checkMtp.disabled = true;
+                    checkMtp.checked = false;
+                    checkMtp.dataset.availableFile = "";
+                    lblMtp.innerText = "(No disponible)";
+                    lblMtp.style.color = "var(--text-muted)";
+                }
+            }
+
             // Binary and Engine Resolution Status
             const selectEngine = document.getElementById("select-engine");
             const engineVal = details.engine || (details.ngl === 0 ? "CPU" : ((details.binary_info && details.binary_info.binary_type === "CUSTOM_DEDICATED") ? "CUDA" : (details.binary_info ? details.binary_info.binary_type : "CUDA")));
@@ -345,10 +380,27 @@ function handleEngineUI(engine) {
 function onVisionCheckboxChange() {
     const checkVision = document.getElementById("check-vision");
     const lblVision = document.getElementById("lbl-vision-file");
+    const checkMtp = document.getElementById("check-mtp");
+    const lblMtp = document.getElementById("lbl-mtp-file");
     if (!checkVision || !lblVision) return;
 
     const availableFile = checkVision.dataset.availableFile || "";
     if (checkVision.checked) {
+        // Enforce llama.cpp restriction: mmproj and MTP are mutually exclusive
+        if (checkMtp && checkMtp.checked) {
+            checkMtp.checked = false;
+            const mtpFile = checkMtp.dataset.availableFile || "";
+            if (lblMtp) {
+                lblMtp.innerText = mtpFile ? `(${mtpFile} — Desactivado por Vision)` : "(Desactivado por Vision)";
+                lblMtp.style.color = "var(--text-muted)";
+            }
+            if (currentBatchDetails) {
+                currentBatchDetails.spec_type = "";
+                currentBatchDetails.spec_draft_model = "";
+                currentBatchDetails.mtp_enabled = false;
+            }
+        }
+
         lblVision.innerText = availableFile ? `(${availableFile})` : "(Activo)";
         lblVision.style.color = "var(--accent-emerald)";
         if (currentBatchDetails) {
@@ -359,6 +411,51 @@ function onVisionCheckboxChange() {
         lblVision.style.color = "var(--text-muted)";
         if (currentBatchDetails) {
             currentBatchDetails.mmproj_file = "";
+        }
+    }
+    syncUItoBatEditor();
+}
+
+/**
+ * Reacts to user toggling the Multi Token Prediction (MTP) checkbox.
+ * Enables or disables speculative draft model flags in the configuration.
+ */
+function onMtpCheckboxChange() {
+    const checkMtp = document.getElementById("check-mtp");
+    const lblMtp = document.getElementById("lbl-mtp-file");
+    const checkVision = document.getElementById("check-vision");
+    const lblVision = document.getElementById("lbl-vision-file");
+    if (!checkMtp || !lblMtp) return;
+
+    const availableFile = checkMtp.dataset.availableFile || "";
+    if (checkMtp.checked) {
+        // Enforce llama.cpp restriction: MTP and mmproj are mutually exclusive
+        if (checkVision && checkVision.checked) {
+            checkVision.checked = false;
+            const visFile = checkVision.dataset.availableFile || "";
+            if (lblVision) {
+                lblVision.innerText = visFile ? `(${visFile} — Desactivado por MTP)` : "(Desactivado por MTP)";
+                lblVision.style.color = "var(--text-muted)";
+            }
+            if (currentBatchDetails) {
+                currentBatchDetails.mmproj_file = "";
+            }
+        }
+
+        lblMtp.innerText = availableFile ? `(${availableFile})` : "(Activo)";
+        lblMtp.style.color = "var(--accent-emerald)";
+        if (currentBatchDetails) {
+            currentBatchDetails.spec_type = "draft-mtp";
+            currentBatchDetails.spec_draft_model = availableFile;
+            currentBatchDetails.mtp_enabled = true;
+        }
+    } else {
+        lblMtp.innerText = availableFile ? `(${availableFile} — Desactivado)` : "(Desactivado)";
+        lblMtp.style.color = "var(--text-muted)";
+        if (currentBatchDetails) {
+            currentBatchDetails.spec_type = "";
+            currentBatchDetails.spec_draft_model = "";
+            currentBatchDetails.mtp_enabled = false;
         }
     }
     syncUItoBatEditor();
@@ -395,6 +492,11 @@ function syncUItoBatEditor() {
         const availableMmproj = checkVision ? (checkVision.dataset.availableFile || "") : "";
         const mmprojFile = (visionEnabled && availableMmproj) ? availableMmproj : "";
 
+        const checkMtp = document.getElementById("check-mtp");
+        const mtpEnabled = checkMtp ? checkMtp.checked : false;
+        const availableMtp = checkMtp ? (checkMtp.dataset.availableFile || "") : "";
+        const mtpFile = (mtpEnabled && availableMtp) ? availableMtp : "";
+
         // JSON format synchronization
         if (content.trim().startsWith("{")) {
             try {
@@ -405,6 +507,16 @@ function syncUItoBatEditor() {
                 if (ngl !== null && !isNaN(ngl)) jsonObj.ngl = ngl;
                 jsonObj.engine = engine;
                 jsonObj.mmproj_file = mmprojFile;
+                if (mtpEnabled && mtpFile) {
+                    jsonObj.spec_type = "draft-mtp";
+                    jsonObj.spec_draft_model = mtpFile;
+                    jsonObj.spec_draft_n_max = jsonObj.spec_draft_n_max || 2;
+                    jsonObj.spec_draft_p_min = jsonObj.spec_draft_p_min || 0.5;
+                    jsonObj.n_gpu_layers_draft = jsonObj.n_gpu_layers_draft || "all";
+                } else {
+                    jsonObj.spec_type = "";
+                    jsonObj.spec_draft_model = "";
+                }
                 if (flashAttn !== null) jsonObj.flash_attn = flashAttn;
                 if (pqEnabled) {
                     const pqMap = { "4": "q3_k", "1": "q4_0", "5": "q5_0", "6": "q6_k", "2": "q8_0" };
@@ -445,6 +557,41 @@ function syncUItoBatEditor() {
             }
             if (/set\s+["\']?MMPROJ_FLAG=[^\r\n]*/i.test(content)) {
                 content = content.replace(/set\s+["\']?MMPROJ_FLAG=[^\r\n]*/i, 'set "MMPROJ_FLAG="');
+            }
+        }
+
+        // Multi Token Prediction (MTP) Batch format
+        if (mtpEnabled && mtpFile) {
+            if (/set\s+["\']?MTP_MODEL=[^\r\n]*/i.test(content)) {
+                content = content.replace(/set\s+["\']?MTP_MODEL=[^\r\n]*/i, `set "MTP_MODEL=%BASEDIR%${mtpFile}"`);
+            }
+            if (/--spec-draft-model\s+["\']?[^"\'\r\n]+["\']?/.test(content)) {
+                if (!/--spec-draft-model\s+["\']?%MTP_MODEL%["\']?/.test(content)) {
+                    content = content.replace(/--spec-draft-model\s+["\']?[^"\'\r\n]+["\']?/, `--spec-draft-model    "%BASEDIR%${mtpFile}"`);
+                }
+            } else {
+                const mAnchor = content.match(/(!MMPROJ_FLAG!\s*\^|--model\s+["\'][^"\']+["\']\s*\^|--model\s+\S+\s*\^)/);
+                if (mAnchor) {
+                    content = content.replace(mAnchor[0], `${mAnchor[0]}\r\n  --spec-type           draft-mtp     ^\r\n  --spec-draft-model    "%BASEDIR%${mtpFile}" ^\r\n  --spec-draft-n-max    2             ^\r\n  --spec-draft-p-min    0.5           ^\r\n  --n-gpu-layers-draft  all           ^`);
+                }
+            }
+            if (/--spec-type\s+[a-zA-Z0-9_\-]+/.test(content)) {
+                content = content.replace(/--spec-type\s+[a-zA-Z0-9_\-]+/, '--spec-type           draft-mtp');
+            }
+            if (/echo\s+Modelo Borrador\s*:.*[^\r\n]*/.test(content)) {
+                content = content.replace(/echo\s+Modelo Borrador\s*:.*[^\r\n]*/, `echo  Modelo Borrador : ${mtpFile} (MTP Draft)`);
+            }
+        } else {
+            if (/set\s+["\']?MTP_MODEL=[^\r\n]*/i.test(content)) {
+                content = content.replace(/set\s+["\']?MTP_MODEL=[^\r\n]*/i, 'set "MTP_MODEL="');
+            }
+            content = content.replace(/\r?\n\s*--spec-type\s+[^\r\n]+\s*\^/g, "");
+            content = content.replace(/\r?\n\s*--spec-draft-model\s+[^\r\n]+\s*\^/g, "");
+            content = content.replace(/\r?\n\s*--spec-draft-n-max\s+[^\r\n]+\s*\^/g, "");
+            content = content.replace(/\r?\n\s*--spec-draft-p-min\s+[^\r\n]+\s*\^/g, "");
+            content = content.replace(/\r?\n\s*--n-gpu-layers-draft\s+[^\r\n]+\s*\^/g, "");
+            if (/echo\s+Modelo Borrador\s*:.*[^\r\n]*/.test(content)) {
+                content = content.replace(/echo\s+Modelo Borrador\s*:.*[^\r\n]*/, 'echo  Modelo Borrador : Desactivado');
             }
         }
         if (engine) {
@@ -648,6 +795,22 @@ function syncBatEditorToUI() {
                         }
                     }
                 }
+                const checkMtp = document.getElementById("check-mtp");
+                const lblMtp = document.getElementById("lbl-mtp-file");
+                if (checkMtp && data.spec_draft_model !== undefined) {
+                    const isMtpActive = !!(data.spec_draft_model && data.spec_draft_model.trim() !== "" && data.spec_type);
+                    checkMtp.checked = isMtpActive;
+                    const dispMtp = data.spec_draft_model || checkMtp.dataset.availableFile || "";
+                    if (lblMtp) {
+                        if (isMtpActive) {
+                            lblMtp.innerText = `(${dispMtp})`;
+                            lblMtp.style.color = "var(--accent-emerald)";
+                        } else {
+                            lblMtp.innerText = dispMtp ? `(${dispMtp} — Desactivado)` : "(Desactivado)";
+                            lblMtp.style.color = "var(--text-muted)";
+                        }
+                    }
+                }
                 markBatPendingChanges();
                 return;
             } finally {
@@ -737,6 +900,27 @@ function syncBatEditorToUI() {
                 if (lblVision && checkVision.dataset.availableFile) {
                     lblVision.innerText = `(${checkVision.dataset.availableFile} — Desactivado)`;
                     lblVision.style.color = "var(--text-muted)";
+                }
+            }
+        }
+        const mMtp = content.match(/--spec-draft-model\s+["\']?([^"\'\r\n]+)["\']?/i) || content.match(/set\s+["\']?MTP_MODEL=(?:%BASEDIR%)?([^"\'\r\n]+)/i);
+        const hasSpecType = /--spec-type\s+([a-zA-Z0-9_\-]+)/i.test(content);
+        const checkMtp = document.getElementById("check-mtp");
+        const lblMtp = document.getElementById("lbl-mtp-file");
+        if (checkMtp) {
+            if (mMtp && hasSpecType && mMtp[1].trim() !== "") {
+                const fName = mMtp[1].trim().replace("%BASEDIR%", "");
+                checkMtp.checked = true;
+                checkMtp.dataset.availableFile = fName;
+                if (lblMtp) {
+                    lblMtp.innerText = `(${fName})`;
+                    lblMtp.style.color = "var(--accent-emerald)";
+                }
+            } else {
+                checkMtp.checked = false;
+                if (lblMtp && checkMtp.dataset.availableFile) {
+                    lblMtp.innerText = `(${checkMtp.dataset.availableFile} — Desactivado)`;
+                    lblMtp.style.color = "var(--text-muted)";
                 }
             }
         }
@@ -1168,6 +1352,11 @@ function initBatchUIEvents() {
     const visionEl = document.getElementById("check-vision");
     if (visionEl) {
         visionEl.addEventListener("change", onVisionCheckboxChange);
+    }
+
+    const mtpEl = document.getElementById("check-mtp");
+    if (mtpEl) {
+        mtpEl.addEventListener("change", onMtpCheckboxChange);
     }
 
     const editor = document.getElementById("editor-bat-content");

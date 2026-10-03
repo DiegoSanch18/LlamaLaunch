@@ -1144,6 +1144,66 @@ class TestJsonConfigManagement(unittest.TestCase):
         updated_vulkan = batch_manager.update_batch_script_content(sample_bat, {"engine": "VULKAN"})
         self.assertIn("llama-b9297-bin-win-vulkan-x64", updated_vulkan)
 
+    def test_mtp_toggle_and_batch_sync(self):
+        """Verifies that toggling MTP (Multi Token Prediction) properly synchronizes .json and .bat."""
+        if not HAS_BATCH_MANAGER:
+            self.skipTest("batch_manager not imported.")
+
+        bat_file = self.root / "run-mtp.bat"
+        json_file = self.root / "run-mtp.json"
+        mtp_file = self.root / "mtp-draft.gguf"
+        mtp_file.write_bytes(b"GGUF" + b"\x00" * 20)
+
+        bat_content = (
+            "@echo off\r\n"
+            "set \"BASEDIR=%~dp0\"\r\n"
+            "set \"MODEL=%BASEDIR%base.gguf\"\r\n"
+            "set \"MTP_MODEL=%BASEDIR%mtp-draft.gguf\"\r\n"
+            "echo  Modelo Borrador : mtp-draft.gguf (MTP Draft)\r\n"
+            "llama-server.exe ^\r\n"
+            "  --model \"%MODEL%\" ^\r\n"
+            "  --spec-type draft-mtp ^\r\n"
+            "  --spec-draft-model \"%MTP_MODEL%\" ^\r\n"
+            "  --spec-draft-n-max 2 ^\r\n"
+            "  --spec-draft-p-min 0.5 ^\r\n"
+            "  --n-gpu-layers-draft all ^\r\n"
+            "  --ctx-size 8192\r\n"
+        )
+        bat_file.write_text(bat_content, encoding="utf-8")
+
+        # Convert to JSON
+        batch_manager.convert_bat_to_json(bat_file)
+        self.assertTrue(json_file.exists())
+
+        parsed = batch_manager.parse_json_config(json_file)
+        self.assertTrue(parsed["mtp_enabled"])
+        self.assertEqual(parsed["available_mtp"], "mtp-draft.gguf")
+        self.assertEqual(parsed["spec_draft_model"], "mtp-draft.gguf")
+
+        # Toggle MTP OFF
+        data = json.loads(json_file.read_text(encoding="utf-8"))
+        data["spec_draft_model"] = ""
+        data["spec_type"] = ""
+        data["mtp_enabled"] = False
+        batch_manager.save_json_config(json_file, json.dumps(data), sync_bat=True)
+
+        bat_off = bat_file.read_text(encoding="utf-8")
+        self.assertIn('set "MTP_MODEL="', bat_off)
+        self.assertNotIn('--spec-type draft-mtp', bat_off)
+        self.assertNotIn('--spec-draft-model', bat_off)
+        self.assertIn('echo  Modelo Borrador : Desactivado', bat_off)
+
+        # Toggle MTP ON
+        data["spec_draft_model"] = "mtp-draft.gguf"
+        data["spec_type"] = "draft-mtp"
+        data["mtp_enabled"] = True
+        batch_manager.save_json_config(json_file, json.dumps(data), sync_bat=True)
+
+        bat_on = bat_file.read_text(encoding="utf-8")
+        self.assertIn('set "MTP_MODEL=%BASEDIR%mtp-draft.gguf"', bat_on)
+        self.assertIn('--spec-type           draft-mtp', bat_on)
+        self.assertIn('echo  Modelo Borrador : mtp-draft.gguf (MTP Draft)', bat_on)
+
     def test_api_prioritizes_json_config(self):
         """Verifies that ApiBridge.get_model_batch_details prioritizes .json configuration files."""
         if not HAS_API_BRIDGE:
