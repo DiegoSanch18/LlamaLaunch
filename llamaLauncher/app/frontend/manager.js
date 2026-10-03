@@ -187,15 +187,38 @@ async function onBatchModelChange() {
                 document.getElementById("input-minp").value = details.min_p !== undefined ? details.min_p : 0.05;
             }
 
-            // Vision Projector (mmproj) Display
-            const mmprojInput = document.getElementById("input-mmproj");
-            if (mmprojInput) {
-                if (details.mmproj_file) {
-                    mmprojInput.value = details.mmproj_file;
-                } else if (details.model_info && details.model_info.mmproj && details.model_info.mmproj.length > 0) {
-                    mmprojInput.value = details.model_info.mmproj[0].filename;
+            // Vision Projector (mmproj) Checkbox State
+            const checkVision = document.getElementById("check-vision");
+            const lblVision = document.getElementById("lbl-vision-file");
+
+            let visionFile = "";
+            if (details.model_info && details.model_info.mmproj && details.model_info.mmproj.length > 0) {
+                visionFile = details.model_info.mmproj[0].filename;
+            } else if (details.available_mmproj) {
+                visionFile = details.available_mmproj;
+            } else if (details.mmproj_file && details.mmproj_file.trim() !== "" && details.mmproj_file !== "None") {
+                visionFile = details.mmproj_file;
+            }
+
+            if (checkVision && lblVision) {
+                if (visionFile) {
+                    checkVision.disabled = false;
+                    checkVision.dataset.availableFile = visionFile;
+                    const isVisionActive = !!(details.mmproj_file && details.mmproj_file.trim() !== "" && details.mmproj_file !== "None");
+                    checkVision.checked = isVisionActive;
+                    if (isVisionActive) {
+                        lblVision.innerText = `(${visionFile})`;
+                        lblVision.style.color = "var(--accent-emerald)";
+                    } else {
+                        lblVision.innerText = `(${visionFile} — Desactivado)`;
+                        lblVision.style.color = "var(--text-muted)";
+                    }
                 } else {
-                    mmprojInput.value = "None (Text LLM)";
+                    checkVision.disabled = true;
+                    checkVision.checked = false;
+                    checkVision.dataset.availableFile = "";
+                    lblVision.innerText = "(No disponible)";
+                    lblVision.style.color = "var(--text-muted)";
                 }
             }
 
@@ -316,6 +339,32 @@ function handleEngineUI(engine) {
 }
 
 /**
+ * Reacts to user toggling the Vision (mmproj) checkbox.
+ * Enables or disables multimodal projector flag in the configuration.
+ */
+function onVisionCheckboxChange() {
+    const checkVision = document.getElementById("check-vision");
+    const lblVision = document.getElementById("lbl-vision-file");
+    if (!checkVision || !lblVision) return;
+
+    const availableFile = checkVision.dataset.availableFile || "";
+    if (checkVision.checked) {
+        lblVision.innerText = availableFile ? `(${availableFile})` : "(Activo)";
+        lblVision.style.color = "var(--accent-emerald)";
+        if (currentBatchDetails) {
+            currentBatchDetails.mmproj_file = availableFile;
+        }
+    } else {
+        lblVision.innerText = availableFile ? `(${availableFile} — Desactivado)` : "(Desactivado)";
+        lblVision.style.color = "var(--text-muted)";
+        if (currentBatchDetails) {
+            currentBatchDetails.mmproj_file = "";
+        }
+    }
+    syncUItoBatEditor();
+}
+
+/**
  * Synchronizes modifications from the UI parameter inputs into the raw .BAT or .JSON editor textarea.
  */
 function syncUItoBatEditor() {
@@ -341,6 +390,10 @@ function syncUItoBatEditor() {
         const topK = document.getElementById("input-topk") ? parseInt(document.getElementById("input-topk").value) : null;
         const minP = document.getElementById("input-minp") ? parseFloat(document.getElementById("input-minp").value) : null;
         const engine = document.getElementById("select-engine") ? document.getElementById("select-engine").value : "CUDA";
+        const checkVision = document.getElementById("check-vision");
+        const visionEnabled = checkVision ? checkVision.checked : false;
+        const availableMmproj = checkVision ? (checkVision.dataset.availableFile || "") : "";
+        const mmprojFile = (visionEnabled && availableMmproj) ? availableMmproj : "";
 
         // JSON format synchronization
         if (content.trim().startsWith("{")) {
@@ -351,6 +404,7 @@ function syncUItoBatEditor() {
                 if (threads && !isNaN(threads)) jsonObj.threads = threads;
                 if (ngl !== null && !isNaN(ngl)) jsonObj.ngl = ngl;
                 jsonObj.engine = engine;
+                jsonObj.mmproj_file = mmprojFile;
                 if (flashAttn !== null) jsonObj.flash_attn = flashAttn;
                 if (pqEnabled) {
                     const pqMap = { "4": "q3_k", "1": "q4_0", "5": "q5_0", "6": "q6_k", "2": "q8_0" };
@@ -378,6 +432,21 @@ function syncUItoBatEditor() {
         }
 
         // Batch script format fallback
+        if (mmprojFile) {
+            if (/set\s+["\']?MMPROJ=[^\r\n]*/i.test(content)) {
+                content = content.replace(/set\s+["\']?MMPROJ=[^\r\n]*/i, `set "MMPROJ=%BASEDIR%${mmprojFile}"`);
+            }
+            if (/set\s+["\']?MMPROJ_FLAG=[^\r\n]*/i.test(content)) {
+                content = content.replace(/set\s+["\']?MMPROJ_FLAG=[^\r\n]*/i, 'set "MMPROJ_FLAG=--mmproj "!MMPROJ!""');
+            }
+        } else {
+            if (/set\s+["\']?MMPROJ=[^\r\n]*/i.test(content)) {
+                content = content.replace(/set\s+["\']?MMPROJ=[^\r\n]*/i, 'set "MMPROJ="');
+            }
+            if (/set\s+["\']?MMPROJ_FLAG=[^\r\n]*/i.test(content)) {
+                content = content.replace(/set\s+["\']?MMPROJ_FLAG=[^\r\n]*/i, 'set "MMPROJ_FLAG="');
+            }
+        }
         if (port && !isNaN(port)) {
             content = content.replace(/--port\s+\d+/, `--port          ${port}`);
             content = content.replace(/Puerto\s*:\s*\d+/, `Puerto : ${port}`);
@@ -518,6 +587,22 @@ function syncBatEditorToUI() {
                 if (data.min_p !== undefined && document.getElementById("input-minp")) {
                     document.getElementById("input-minp").value = data.min_p;
                 }
+                const checkVision = document.getElementById("check-vision");
+                const lblVision = document.getElementById("lbl-vision-file");
+                if (checkVision && data.mmproj_file !== undefined) {
+                    const isVisionActive = !!(data.mmproj_file && data.mmproj_file.trim() !== "");
+                    checkVision.checked = isVisionActive;
+                    const dispFile = data.mmproj_file || checkVision.dataset.availableFile || "";
+                    if (lblVision) {
+                        if (isVisionActive) {
+                            lblVision.innerText = `(${dispFile})`;
+                            lblVision.style.color = "var(--accent-emerald)";
+                        } else {
+                            lblVision.innerText = dispFile ? `(${dispFile} — Desactivado)` : "(Desactivado)";
+                            lblVision.style.color = "var(--text-muted)";
+                        }
+                    }
+                }
                 markBatPendingChanges();
                 return;
             } finally {
@@ -589,6 +674,26 @@ function syncBatEditorToUI() {
         const mMinp = content.match(/--min-p\s+([0-9.]+)/);
         if (mMinp && document.getElementById("input-minp")) {
             document.getElementById("input-minp").value = parseFloat(mMinp[1]);
+        }
+        const mMm = content.match(/set\s+["\']?MMPROJ=(?:%BASEDIR%)?([^"\'\r\n]+)/i);
+        const checkVision = document.getElementById("check-vision");
+        const lblVision = document.getElementById("lbl-vision-file");
+        if (checkVision) {
+            if (mMm && mMm[1].trim() !== "") {
+                const fName = mMm[1].trim();
+                checkVision.checked = true;
+                checkVision.dataset.availableFile = fName;
+                if (lblVision) {
+                    lblVision.innerText = `(${fName})`;
+                    lblVision.style.color = "var(--accent-emerald)";
+                }
+            } else {
+                checkVision.checked = false;
+                if (lblVision && checkVision.dataset.availableFile) {
+                    lblVision.innerText = `(${checkVision.dataset.availableFile} — Desactivado)`;
+                    lblVision.style.color = "var(--text-muted)";
+                }
+            }
         }
 
         markBatPendingChanges();
@@ -1008,6 +1113,16 @@ function initBatchUIEvents() {
             el.addEventListener("change", syncUItoBatEditor);
         }
     });
+
+    const engineEl = document.getElementById("select-engine");
+    if (engineEl) {
+        engineEl.addEventListener("change", onEngineOrPqChange);
+    }
+
+    const visionEl = document.getElementById("check-vision");
+    if (visionEl) {
+        visionEl.addEventListener("change", onVisionCheckboxChange);
+    }
 
     const editor = document.getElementById("editor-bat-content");
     if (editor) {

@@ -1065,6 +1065,42 @@ class TestJsonConfigManagement(unittest.TestCase):
         self.assertIn("9090", bat_updated_content)
         self.assertIn("--n-gpu-layers  0", bat_updated_content)
 
+    def test_vision_projector_toggle_and_bat_sync(self):
+        """Verifies that enabling/disabling Vision updates mmproj_file and synchronizes .bat MMPROJ."""
+        bat_content = (
+            "@echo off\r\n"
+            'set "BASEDIR=%~dp0"\r\n'
+            'set "MODEL=%BASEDIR%vision-model.gguf"\r\n'
+            'set "MMPROJ=%BASEDIR%mmproj-test.gguf"\r\n'
+            'set "MMPROJ_FLAG=--mmproj "!MMPROJ!""\r\n'
+            'llama-server.exe --model "%MODEL%" !MMPROJ_FLAG! --port 8080\r\n'
+        )
+        bat_file = self.root / "run-vision.bat"
+        bat_file.write_text(bat_content, encoding="utf-8")
+
+        # Convert to JSON
+        batch_manager.convert_bat_to_json(bat_file)
+        json_file = self.root / "run-vision.json"
+        self.assertTrue(json_file.exists())
+
+        # Toggle Vision OFF: mmproj_file = ""
+        data = json.loads(json_file.read_text(encoding="utf-8"))
+        self.assertEqual(data["mmproj_file"], "mmproj-test.gguf")
+        data["mmproj_file"] = ""
+        batch_manager.save_json_config(json_file, json.dumps(data), sync_bat=True)
+
+        bat_off = bat_file.read_text(encoding="utf-8")
+        self.assertIn('set "MMPROJ="', bat_off)
+        self.assertIn('set "MMPROJ_FLAG="', bat_off)
+
+        # Toggle Vision ON: mmproj_file = "mmproj-test.gguf"
+        data["mmproj_file"] = "mmproj-test.gguf"
+        batch_manager.save_json_config(json_file, json.dumps(data), sync_bat=True)
+
+        bat_on = bat_file.read_text(encoding="utf-8")
+        self.assertIn('set "MMPROJ=%BASEDIR%mmproj-test.gguf"', bat_on)
+        self.assertIn('set "MMPROJ_FLAG=--mmproj "!MMPROJ!""', bat_on)
+
     def test_api_prioritizes_json_config(self):
         """Verifies that ApiBridge.get_model_batch_details prioritizes .json configuration files."""
         if not HAS_API_BRIDGE:

@@ -105,9 +105,33 @@ def parse_batch_script(bat_path: Path) -> Dict[str, Any]:
     if m_mod:
         config["model_file"] = Path(m_mod.group(1).strip()).name
 
-    m_mmp = re.search(r'set\s+["\']?MMPROJ=(?:%BASEDIR%)?([^"\'\r\n]+)["\']?', content, re.IGNORECASE)
-    if m_mmp:
-        config["mmproj_file"] = Path(m_mmp.group(1).strip()).name
+    # Check if MMPROJ is conditionally assigned with 'if exist'
+    m_if_mmp = re.search(r'if\s+exist\s+["\']?(?:%BASEDIR%)?([^"\'\s]+)["\']?\s*\(\s*set\s+["\']?MMPROJ=', content, re.IGNORECASE)
+    if m_if_mmp:
+        cand_name = Path(m_if_mmp.group(1).strip()).name
+        if (bat_path.parent / cand_name).exists():
+            config["mmproj_file"] = cand_name
+        else:
+            config["mmproj_file"] = ""
+    else:
+        m_mmp = re.search(r'set\s+["\']?MMPROJ=(?:%BASEDIR%)?([^"\'\r\n]+)["\']?', content, re.IGNORECASE)
+        cand_mmproj = Path(m_mmp.group(1).strip()).name if m_mmp else ""
+        if not cand_mmproj:
+            m_cli_mmp = re.search(r'--mmproj\s+["\']?(?:%BASEDIR%)?([^"\'\s]+)["\']?', content, re.IGNORECASE)
+            if m_cli_mmp:
+                cand_mmproj = Path(m_cli_mmp.group(1).strip()).name
+        config["mmproj_file"] = cand_mmproj
+
+    available_mmproj = config["mmproj_file"]
+    if not available_mmproj:
+        try:
+            for f in bat_path.parent.glob("*mmproj*.gguf"):
+                available_mmproj = f.name
+                break
+        except Exception:
+            pass
+    config["available_mmproj"] = available_mmproj
+    config["vision_enabled"] = bool(config["mmproj_file"])
 
     m_alias = re.search(r'--alias\s+([a-zA-Z0-9_\-\.]+)', content)
     if m_alias:
@@ -234,6 +258,20 @@ def update_batch_script_content(content: str, updates: Dict[str, Any]) -> str:
         minp = float(updates["min_p"])
         if re.search(r'--min-p\s+[0-9.]+', updated):
             updated = re.sub(r'--min-p\s+[0-9.]+', f'--min-p         {minp}', updated)
+
+    if "mmproj_file" in updates:
+        mmproj = updates["mmproj_file"]
+        if mmproj:
+            mmproj_name = Path(mmproj).name
+            if re.search(r'set\s+["\']?MMPROJ=.*', updated, re.IGNORECASE):
+                updated = re.sub(r'set\s+["\']?MMPROJ=[^\r\n]*', f'set "MMPROJ=%BASEDIR%{mmproj_name}"', updated, flags=re.IGNORECASE)
+            if re.search(r'set\s+["\']?MMPROJ_FLAG=.*', updated, re.IGNORECASE):
+                updated = re.sub(r'set\s+["\']?MMPROJ_FLAG=[^\r\n]*', 'set "MMPROJ_FLAG=--mmproj "!MMPROJ!""', updated, flags=re.IGNORECASE)
+        else:
+            if re.search(r'set\s+["\']?MMPROJ=.*', updated, re.IGNORECASE):
+                updated = re.sub(r'set\s+["\']?MMPROJ=[^\r\n]*', 'set "MMPROJ="', updated, flags=re.IGNORECASE)
+            if re.search(r'set\s+["\']?MMPROJ_FLAG=.*', updated, re.IGNORECASE):
+                updated = re.sub(r'set\s+["\']?MMPROJ_FLAG=[^\r\n]*', 'set "MMPROJ_FLAG="', updated, flags=re.IGNORECASE)
 
     return updated
 
@@ -486,6 +524,19 @@ def parse_json_config(json_path: Path) -> Dict[str, Any]:
     ngl = data.get("ngl", data.get("n_gpu_layers", 99))
     engine = data.get("engine", "CPU" if ngl == 0 else "CUDA")
 
+    mmproj_file = data.get("mmproj_file", "")
+    if mmproj_file and not (json_path.parent / mmproj_file).exists():
+        mmproj_file = ""
+
+    available_mmproj = mmproj_file
+    if not available_mmproj:
+        try:
+            for f in json_path.parent.glob("*mmproj*.gguf"):
+                available_mmproj = f.name
+                break
+        except Exception:
+            pass
+
     config: Dict[str, Any] = {
         "success": True,
         "config_format": "JSON",
@@ -512,7 +563,9 @@ def parse_json_config(json_path: Path) -> Dict[str, Any]:
         "min_p": data.get("min_p", 0.05),
         "repeat_penalty": data.get("repeat_penalty", 1.0),
         "model_file": data.get("model_file", ""),
-        "mmproj_file": data.get("mmproj_file", ""),
+        "mmproj_file": mmproj_file,
+        "available_mmproj": available_mmproj,
+        "vision_enabled": bool(mmproj_file),
         "alias": data.get("alias", ""),
         "spec_type": data.get("spec_type", ""),
         "spec_draft_model": data.get("spec_draft_model", ""),

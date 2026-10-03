@@ -85,8 +85,24 @@ def patch_pywebview_bottle() -> bool:
                     sig = inspect.signature(func)
                     if 'file' in sig.parameters and sig.parameters['file'].default is inspect.Parameter.empty:
                         def fixed_asset(file='index.html', *args, **kwargs):
+                            try:
+                                bottle.response.set_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+                                bottle.response.set_header('Pragma', 'no-cache')
+                                bottle.response.set_header('Expires', '0')
+                            except Exception:
+                                pass
                             return func(file, *args, **kwargs)
                         return decorator(fixed_asset)
+                    else:
+                        def nocache_asset(*args, **kwargs):
+                            try:
+                                bottle.response.set_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+                                bottle.response.set_header('Pragma', 'no-cache')
+                                bottle.response.set_header('Expires', '0')
+                            except Exception:
+                                pass
+                            return func(*args, **kwargs)
+                        return decorator(nocache_asset)
                 except Exception:
                     pass
                 return decorator(func)
