@@ -483,6 +483,7 @@ function syncUItoBatEditor() {
         const port = document.getElementById("input-port") ? parseInt(document.getElementById("input-port").value) : null;
         const threads = document.getElementById("input-threads") ? parseInt(document.getElementById("input-threads").value) : null;
         const context = document.getElementById("input-context") ? parseInt(document.getElementById("input-context").value) : null;
+        const ngl = document.getElementById("input-ngl") ? parseInt(document.getElementById("input-ngl").value) : null;
         const pqEnabled = document.getElementById("check-pq-enable") ? document.getElementById("check-pq-enable").checked : false;
         let flashAttn = document.getElementById("check-flash-attn") ? document.getElementById("check-flash-attn").checked : null;
         if (pqEnabled) {
@@ -718,6 +719,8 @@ function syncUItoBatEditor() {
             editor.value = content;
             markBatPendingChanges();
         }
+    } catch (e) {
+        console.error("Error in syncUItoBatEditor:", e);
     } finally {
         isSyncing = false;
     }
@@ -1163,7 +1166,11 @@ async function toggleServer() {
         } else if (currentBatchDetails && currentBatchDetails.path) {
             // Orchestrated Batch Runner flow
             // 1. Sync any modified UI parameters to editor
-            syncUItoBatEditor();
+            try {
+                syncUItoBatEditor();
+            } catch (err) {
+                console.error("Error in syncUItoBatEditor before launch:", err);
+            }
 
             const editor = document.getElementById("editor-bat-content");
             const editorContent = editor ? editor.value : currentBatchDetails.raw_content;
