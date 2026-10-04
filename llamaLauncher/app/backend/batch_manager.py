@@ -37,8 +37,8 @@ def parse_batch_script(bat_path: Path) -> Dict[str, Any]:
         "context": 8192,
         "ngl": 99,
         "flash_attn": True,
-        "cache_type_k": "q4_0",
-        "cache_type_v": "q4_0",
+        "cache_type_k": "f16",
+        "cache_type_v": "f16",
         "temp": 0.7,
         "top_p": 0.95,
         "top_k": 40,
@@ -68,12 +68,6 @@ def parse_batch_script(bat_path: Path) -> Dict[str, Any]:
     if m_ngl:
         config["ngl"] = int(m_ngl.group(1))
 
-    # Flash attention
-    if "--flash-attn off" in content or "-fa off" in content:
-        config["flash_attn"] = False
-    elif "--flash-attn on" in content or "-fa on" in content:
-        config["flash_attn"] = True
-
     # Cache types
     m_ck = re.search(r'--cache-type-k\s+([A-Za-z0-9_]+)', content)
     if m_ck:
@@ -82,6 +76,16 @@ def parse_batch_script(bat_path: Path) -> Dict[str, Any]:
     m_cv = re.search(r'--cache-type-v\s+([A-Za-z0-9_]+)', content)
     if m_cv:
         config["cache_type_v"] = m_cv.group(1).lower()
+
+    # Flash attention
+    if "--flash-attn off" in content or "-fa off" in content:
+        config["flash_attn"] = False
+    elif "--flash-attn on" in content or "-fa on" in content:
+        config["flash_attn"] = True
+
+    # KV cache quantization strictly requires Flash Attention in llama.cpp
+    if m_ck and config.get("cache_type_k") not in ("f16", "none", None, ""):
+        config["flash_attn"] = True
 
     # Sampling
     m_temp = re.search(r'--temp\s+([0-9.]+)', content)
@@ -263,6 +267,19 @@ def update_batch_script_content(content: str, updates: Dict[str, Any]) -> str:
                 updated
             )
 
+    ck = updates.get("cache_type_k")
+    cv = updates.get("cache_type_v")
+    if ck is not None:
+        ck = str(ck).lower().strip()
+    if cv is not None:
+        cv = str(cv).lower().strip()
+    elif ck is not None:
+        cv = ck
+
+    # KV Cache quantization strictly requires Flash Attention in llama.cpp
+    if ck and ck not in ("f16", "none"):
+        updates["flash_attn"] = True
+
     if "flash_attn" in updates and updates["flash_attn"] is not None:
         fa_val = "on" if updates["flash_attn"] else "off"
         if re.search(r'--flash-attn\s+(on|off)', updated):
@@ -278,15 +295,6 @@ def update_batch_script_content(content: str, updates: Dict[str, Any]) -> str:
         "f16": "FP16 (sin comprimir)",
         "none": "FP16 (sin comprimir)"
     }
-
-    ck = updates.get("cache_type_k")
-    cv = updates.get("cache_type_v")
-    if ck is not None:
-        ck = str(ck).lower().strip()
-    if cv is not None:
-        cv = str(cv).lower().strip()
-    elif ck is not None:
-        cv = ck
 
     if ck:
         has_k = bool(re.search(r'--cache-type-k\s+[A-Za-z0-9_]+', updated))
@@ -737,7 +745,7 @@ def parse_json_config(json_path: Path) -> Dict[str, Any]:
         "ngl": ngl,
         "engine": engine,
         "ubatch_size": data.get("ubatch_size", 512),
-        "flash_attn": data.get("flash_attn", True if engine != "CPU" else False),
+        "flash_attn": True if data.get("cache_type_k") not in ("f16", "none", None, "") else data.get("flash_attn", True),
         "cache_type_k": data.get("cache_type_k", "q4_0"),
         "cache_type_v": data.get("cache_type_v", "q4_0"),
         "temp": data.get("temp", 0.7),

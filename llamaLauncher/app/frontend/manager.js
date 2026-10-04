@@ -314,6 +314,7 @@ function markBatPendingChanges() {
 function handleEngineUI(engine) {
     const inputNgl = document.getElementById("input-ngl");
     const checkFa = document.getElementById("check-flash-attn");
+    const checkPq = document.getElementById("check-pq-enable");
     const badge = document.getElementById("lbl-binary-badge");
 
     if (engine === "CPU") {
@@ -327,9 +328,11 @@ function handleEngineUI(engine) {
             inputNgl.title = "En modo CPU las capas GPU se desactivan (0)";
         }
         if (checkFa) {
-            checkFa.checked = false;
-            checkFa.disabled = true;
-            checkFa.title = "Flash Attention solo está soportado en GPUs NVIDIA con CUDA";
+            checkFa.disabled = false;
+            checkFa.title = "Flash Attention (aceleración AVX2 y soporte obligatorio para KV Cache cuantizado)";
+            if (checkPq && checkPq.checked) {
+                checkFa.checked = true;
+            }
         }
         if (badge) {
             badge.className = "binary-status-badge cpu";
@@ -348,7 +351,11 @@ function handleEngineUI(engine) {
         if (checkFa) {
             checkFa.disabled = false;
             checkFa.title = "";
-            checkFa.checked = (engine === "CUDA");
+            if (checkPq && checkPq.checked) {
+                checkFa.checked = true;
+            } else {
+                checkFa.checked = (engine === "CUDA");
+            }
         }
         if (badge) {
             if (engine === "VULKAN") {
@@ -476,9 +483,13 @@ function syncUItoBatEditor() {
         const port = document.getElementById("input-port") ? parseInt(document.getElementById("input-port").value) : null;
         const threads = document.getElementById("input-threads") ? parseInt(document.getElementById("input-threads").value) : null;
         const context = document.getElementById("input-context") ? parseInt(document.getElementById("input-context").value) : null;
-        const ngl = document.getElementById("input-ngl") ? parseInt(document.getElementById("input-ngl").value) : null;
-        const flashAttn = document.getElementById("check-flash-attn") ? document.getElementById("check-flash-attn").checked : null;
         const pqEnabled = document.getElementById("check-pq-enable") ? document.getElementById("check-pq-enable").checked : false;
+        let flashAttn = document.getElementById("check-flash-attn") ? document.getElementById("check-flash-attn").checked : null;
+        if (pqEnabled) {
+            flashAttn = true;
+            const checkFa = document.getElementById("check-flash-attn");
+            if (checkFa && !checkFa.checked) checkFa.checked = true;
+        }
         const pqMode = document.getElementById("select-pq-mode") ? document.getElementById("select-pq-mode").value : "1";
         const temp = document.getElementById("input-temp") ? parseFloat(document.getElementById("input-temp").value) : null;
         const topP = document.getElementById("input-topp") ? parseFloat(document.getElementById("input-topp").value) : null;
@@ -629,6 +640,9 @@ function syncUItoBatEditor() {
             } else if (/-ngl\s+\d+/.test(content)) {
                 content = content.replace(/-ngl\s+\d+/, `-ngl ${ngl}`);
             }
+        }
+        if (pqEnabled) {
+            flashAttn = true;
         }
         if (flashAttn !== null) {
             const faVal = flashAttn ? "on" : "off";
@@ -1068,15 +1082,32 @@ function onPqCheckboxChange() {
     const enabled = document.getElementById("check-pq-enable").checked;
     const modeGroup = document.getElementById("pq-mode-group");
     const selectPq = document.getElementById("select-pq-mode");
+    const checkFa = document.getElementById("check-flash-attn");
     if (enabled) {
         modeGroup.style.display = "flex";
         if (selectPq && !selectPq.value) {
             selectPq.value = "iq4_nl";
         }
+        // llama.cpp strictly requires flash_attn on when V cache is quantized
+        if (checkFa) {
+            checkFa.checked = true;
+        }
     } else {
         modeGroup.style.display = "none";
     }
     onEngineOrPqChange();
+}
+
+function onFlashAttnCheckboxChange() {
+    const checkFa = document.getElementById("check-flash-attn");
+    const checkPq = document.getElementById("check-pq-enable");
+    const modeGroup = document.getElementById("pq-mode-group");
+    if (checkFa && !checkFa.checked && checkPq && checkPq.checked) {
+        // Disabling Flash Attention is incompatible with quantized V cache in llama.cpp
+        checkPq.checked = false;
+        if (modeGroup) modeGroup.style.display = "none";
+    }
+    syncUItoBatEditor();
 }
 
 /**
