@@ -4,6 +4,39 @@ let currentBatchDetails = null;
 let batchModelsList = [];
 let currentModelRequestId = 0;
 let isSyncing = false;
+let cachedGenericBinaries = [];
+
+/**
+ * Refreshes cached generic binaries list from backend.
+ */
+async function refreshAvailableBinaries() {
+    if (typeof api !== "undefined" && api && api.get_available_binaries) {
+        try {
+            const res = await api.get_available_binaries();
+            if (res && res.success && Array.isArray(res.binaries)) {
+                cachedGenericBinaries = res.binaries;
+            }
+        } catch (e) {
+            console.warn("Could not fetch available binaries:", e);
+        }
+    }
+}
+
+/**
+ * Returns the best available generic or resolved binary descriptor for an engine.
+ */
+function getBestBinaryForEngine(engine) {
+    const engUpper = (engine || "CUDA").toUpperCase();
+    if (cachedGenericBinaries && cachedGenericBinaries.length > 0) {
+        const match = cachedGenericBinaries.find(b => b.binary_type === engUpper);
+        if (match) return match;
+    }
+    if (currentBatchDetails && currentBatchDetails.binary_info) {
+        const bi = currentBatchDetails.binary_info;
+        if (bi.binary_type === engUpper) return bi;
+    }
+    return null;
+}
 
 /**
  * Loads models hierarchically via api.scan_models_and_batches()
@@ -16,6 +49,7 @@ async function loadBatchModels() {
     if (!select) return;
 
     try {
+        await refreshAvailableBinaries();
         const res = await api.scan_models_and_batches();
         select.innerHTML = "";
 
@@ -261,6 +295,9 @@ async function onBatchModelChange() {
             if (selectEngine) {
                 selectEngine.value = engineVal;
             }
+            if (!cachedGenericBinaries || cachedGenericBinaries.length === 0) {
+                await refreshAvailableBinaries();
+            }
             handleEngineUI(engineVal);
 
             // Raw Configuration Editor Populate (.json / .bat)
@@ -336,8 +373,10 @@ function handleEngineUI(engine) {
         }
         if (badge) {
             badge.className = "binary-status-badge cpu";
-            badge.innerText = "💻 CPU Universal (b9283 / AVX2)";
-            badge.title = "Inferencia pura en procesador del sistema sin offload GPU";
+            const bin = getBestBinaryForEngine("CPU");
+            const buildLabel = bin && bin.build && bin.build !== "unknown" ? bin.build : "b11368";
+            badge.innerText = `💻 CPU Universal (${buildLabel} / AVX2)`;
+            badge.title = bin && bin.name ? `Motor CPU: ${bin.name}` : "Inferencia pura en procesador del sistema sin offload GPU";
         }
     } else {
         if (inputNgl) {
@@ -360,8 +399,10 @@ function handleEngineUI(engine) {
         if (badge) {
             if (engine === "VULKAN") {
                 badge.className = "binary-status-badge vulkan";
-                badge.innerText = "⚡ Vulkan b9297";
-                badge.title = "Aceleración gráfica Vulkan (AMD / Intel / Generic)";
+                const bin = getBestBinaryForEngine("VULKAN");
+                const buildLabel = bin && bin.build && bin.build !== "unknown" ? bin.build : "b11368";
+                badge.innerText = `⚡ Vulkan ${buildLabel}`;
+                badge.title = bin && bin.name ? `Motor Vulkan: ${bin.name}` : "Aceleración gráfica Vulkan (AMD / Intel / Generic)";
             } else {
                 if (currentBatchDetails && currentBatchDetails.binary_info && currentBatchDetails.binary_info.is_dedicated) {
                     badge.className = "binary-status-badge dedicated";
@@ -370,8 +411,10 @@ function handleEngineUI(engine) {
                     badge.title = `Binario dedicado: ${currentBatchDetails.binary_info.binary_path}`;
                 } else {
                     badge.className = "binary-status-badge generic";
-                    badge.innerText = "🚀 CUDA b9297";
-                    badge.title = "Aceleración NVIDIA CUDA con Flash Attention";
+                    const bin = getBestBinaryForEngine("CUDA");
+                    const buildLabel = bin && bin.build && bin.build !== "unknown" ? bin.build : "b9297";
+                    badge.innerText = `🚀 CUDA ${buildLabel}`;
+                    badge.title = bin && bin.name ? `Motor CUDA: ${bin.name}` : "Aceleración NVIDIA CUDA con Flash Attention";
                 }
             }
         }
@@ -605,14 +648,23 @@ function syncUItoBatEditor() {
             }
         }
         if (engine) {
-            const binMap = {
-                "CPU": "llama-b9283-bin-win-cpu-x64",
-                "VULKAN": "llama-b9297-bin-win-vulkan-x64",
-                "CUDA": "llama-b9297-bin-win-cuda-x64"
-            };
-            const targetBin = binMap[engine];
+            let targetBin = null;
+            const bin = getBestBinaryForEngine(engine);
+            if (bin && bin.name) {
+                targetBin = bin.name;
+            } else if (currentBatchDetails && currentBatchDetails.binary_info && currentBatchDetails.binary_info.binary_type === engine) {
+                targetBin = currentBatchDetails.binary_info.name;
+            }
+            if (!targetBin) {
+                const dynamicFallbacks = {
+                    "CPU": "llama-b11368-bin-win-cpu-x64",
+                    "VULKAN": "llama-b11368-bin-win-vulkan-x64",
+                    "CUDA": "llama-b9297-bin-win-cuda-x64"
+                };
+                targetBin = dynamicFallbacks[engine];
+            }
             if (targetBin) {
-                content = content.replace(/llama-(?:b\d+)?-?bin-win-(?:cuda|vulkan|cpu)-x64/g, targetBin);
+                content = content.replace(/llama-(?:b\d+)?-?bin-win-(?:cuda|vulkan|cpu)(?:-[a-zA-Z0-9.]+)?-x64/gi, targetBin);
             }
         }
         if (port && !isNaN(port)) {
@@ -1062,6 +1114,7 @@ async function onEngineOrPqChange() {
     const pq_enabled = document.getElementById("check-pq-enable").checked;
     const pq_choice = pq_enabled ? document.getElementById("select-pq-mode").value : "3";
 
+    await refreshAvailableBinaries();
     handleEngineUI(engine);
 
     if (currentBatchDetails) {

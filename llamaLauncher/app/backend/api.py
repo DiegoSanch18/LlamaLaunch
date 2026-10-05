@@ -632,7 +632,6 @@ class ApiBridge:
                         latest_build_num = b_num
                         latest_tag = tag
                         target_release = rel
-                        break
 
             if not target_release:
                 return {
@@ -645,18 +644,46 @@ class ApiBridge:
             chosen_asset = None
 
             if engine_upper == "CUDA":
-                cuda13_assets = [a for a in assets if "bin-win-cuda-13" in a["name"].lower() and "x64.zip" in a["name"].lower() and "arm64" not in a["name"].lower()]
-                cuda_assets = [a for a in assets if "bin-win-cuda" in a["name"].lower() and "x64.zip" in a["name"].lower() and "arm64" not in a["name"].lower()]
+                cuda13_assets = [
+                    a for a in assets 
+                    if a.get("name", "").lower().startswith("llama-") 
+                    and "cudart" not in a.get("name", "").lower() 
+                    and "bin-win-cuda-13" in a.get("name", "").lower() 
+                    and "x64.zip" in a.get("name", "").lower() 
+                    and "arm64" not in a.get("name", "").lower()
+                ]
+                cuda_assets = [
+                    a for a in assets 
+                    if a.get("name", "").lower().startswith("llama-") 
+                    and "cudart" not in a.get("name", "").lower() 
+                    and "bin-win-cuda" in a.get("name", "").lower() 
+                    and "x64.zip" in a.get("name", "").lower() 
+                    and "arm64" not in a.get("name", "").lower()
+                ]
                 if cuda13_assets:
                     chosen_asset = cuda13_assets[0]
                 elif cuda_assets:
                     chosen_asset = cuda_assets[0]
             elif engine_upper == "VULKAN":
-                vulkan_assets = [a for a in assets if "bin-win-vulkan" in a["name"].lower() and "x64.zip" in a["name"].lower() and "arm64" not in a["name"].lower()]
+                vulkan_assets = [
+                    a for a in assets 
+                    if a.get("name", "").lower().startswith("llama-") 
+                    and "cudart" not in a.get("name", "").lower() 
+                    and "bin-win-vulkan" in a.get("name", "").lower() 
+                    and "x64.zip" in a.get("name", "").lower() 
+                    and "arm64" not in a.get("name", "").lower()
+                ]
                 if vulkan_assets:
                     chosen_asset = vulkan_assets[0]
             else:
-                cpu_assets = [a for a in assets if "bin-win-cpu" in a["name"].lower() and "x64.zip" in a["name"].lower() and "arm64" not in a["name"].lower()]
+                cpu_assets = [
+                    a for a in assets 
+                    if a.get("name", "").lower().startswith("llama-") 
+                    and "cudart" not in a.get("name", "").lower() 
+                    and "bin-win-cpu" in a.get("name", "").lower() 
+                    and "x64.zip" in a.get("name", "").lower() 
+                    and "arm64" not in a.get("name", "").lower()
+                ]
                 if cpu_assets:
                     chosen_asset = cpu_assets[0]
 

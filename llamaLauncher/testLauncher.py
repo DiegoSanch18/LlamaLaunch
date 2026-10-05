@@ -656,6 +656,45 @@ class TestBinaryResolverModule(unittest.TestCase):
         self.assertFalse(res["success"])
         self.assertIn("error", res)
 
+    def test_resolve_model_binary_returns_build_num(self):
+        """Verifies resolve_model_binary returns build_num as an integer matching the resolved folder."""
+        if not HAS_BINARIES_MODULE or not hasattr(binaries, "resolve_model_binary"):
+            self.skipTest("binaries module not available.")
+
+        # CUDA b9297
+        res_cuda = binaries.resolve_model_binary(self.standard_model_dir, self.bin_root, dev_type="CUDA")
+        self.assertTrue(res_cuda["success"])
+        self.assertEqual(res_cuda["build_num"], 9297)
+
+        # CPU b9283 in this mock bin_root
+        res_cpu = binaries.resolve_model_binary(self.standard_model_dir, self.bin_root, dev_type="CPU")
+        self.assertTrue(res_cpu["success"])
+        self.assertEqual(res_cpu["build_num"], 9283)
+
+        # Failure case has build_num 0
+        empty_root = self.root / "empty_bins_num"
+        empty_root.mkdir()
+        res_empty = binaries.resolve_model_binary(self.standard_model_dir, empty_root, dev_type="CUDA")
+        self.assertFalse(res_empty["success"])
+        self.assertEqual(res_empty.get("build_num", 0), 0)
+
+    def test_generic_build_regex_cuda_versioned(self):
+        """Verifies GENERIC_BUILD_REGEX correctly parses CUDA folders with version tags (e.g. 13.1, cu12.8)."""
+        if not HAS_BINARIES_MODULE or not hasattr(binaries, "GENERIC_BUILD_REGEX"):
+            self.skipTest("binaries module not available.")
+
+        m1 = binaries.GENERIC_BUILD_REGEX.match("llama-b11368-bin-win-cuda-13.1-x64")
+        self.assertIsNotNone(m1)
+        self.assertEqual(m1.group("build"), "11368")
+        self.assertEqual(m1.group("backend").upper(), "CUDA")
+        self.assertEqual(m1.group("arch").lower(), "x64")
+
+        m2 = binaries.GENERIC_BUILD_REGEX.match("llama-b11368-bin-win-cuda-cu12.8-x64")
+        self.assertIsNotNone(m2)
+        self.assertEqual(m2.group("build"), "11368")
+        self.assertEqual(m2.group("backend").upper(), "CUDA")
+        self.assertEqual(m2.group("arch").lower(), "x64")
+
 
 class TestBatchManagerModule(unittest.TestCase):
     """Audits batch script parsing, generation, and safe persistence with backups."""
@@ -758,6 +797,33 @@ class TestBatchManagerModule(unittest.TestCase):
         self.assertIn("qwen-coder.gguf", template)
         self.assertIn('set "MMPROJ_FLAG="', template)
         self.assertNotIn("None", template)
+
+    def test_generate_batch_template_cpu_calibration(self):
+        """Verifies template generation with engine=CPU calibrates ngl to 0 and updates banners."""
+        folder = self.root / "Gemma 4" / "E2B"
+        template = batch_manager.generate_batch_template(
+            model_folder=folder,
+            model_filename="gemma-4-e2b.gguf",
+            family_name="Gemma 4",
+            variant_name="E2B",
+            engine="CPU"
+        )
+        self.assertIn("--n-gpu-layers  0", template)
+        self.assertNotIn("--n-gpu-layers  99", template)
+        self.assertIn("Hardware Target : Inferencia en CPU (AVX2)", template)
+
+    def test_generate_batch_template_cuda_calibration(self):
+        """Verifies template generation with engine=CUDA defaults ngl to 99 and targets RTX."""
+        folder = self.root / "Qwen 2.5" / "14B"
+        template = batch_manager.generate_batch_template(
+            model_folder=folder,
+            model_filename="qwen-14b.gguf",
+            family_name="Qwen 2.5",
+            variant_name="14B",
+            engine="CUDA"
+        )
+        self.assertIn("--n-gpu-layers  99", template)
+        self.assertIn("NVIDIA GeForce RTX 5060 Ti", template)
 
     def test_save_batch_script_with_backup_and_crlf(self):
         """Verifies saving batch script creates .bat.bak and writes CRLF line endings."""
@@ -1139,21 +1205,45 @@ class TestJsonConfigManagement(unittest.TestCase):
         self.assertIn("echo  KV Cache        : Rendimiento (iq4_nl) ^| Contexto: 32768 tokens", updated)
 
     def test_engine_binary_update_in_batch(self):
-        """Verifies that engine changes (CPU/VULKAN/CUDA) update the generic binary folder path in batch scripts."""
+        """Verifies that engine changes (CPU/VULKAN/CUDA) dynamically update the generic binary folder path and Hardware Target banner in batch scripts."""
         if not HAS_BATCH_MANAGER:
             self.skipTest("batch_manager not imported.")
 
         sample_bat = (
             "@echo off\r\n"
+            "echo  Hardware Target : NVIDIA GeForce RTX 5060 Ti\r\n"
             "set \"BINDIR=%BASEDIR%..\\llamaLauncher\\bin\\llama.cpp\\llama-b9297-bin-win-cuda-x64\"\r\n"
             "llama-server.exe --ctx-size 8192\r\n"
         )
         updated_cpu = batch_manager.update_batch_script_content(sample_bat, {"engine": "CPU"})
-        self.assertIn("llama-b9283-bin-win-cpu-x64", updated_cpu)
+        res_cpu = binaries.resolve_model_binary(dev_type="CPU", force_generic=True) if HAS_BINARIES_MODULE else {}
+        expected_cpu_bin = res_cpu.get("name") or "llama-b11368-bin-win-cpu-x64"
+        self.assertIn(expected_cpu_bin, updated_cpu)
         self.assertNotIn("llama-b9297-bin-win-cuda-x64", updated_cpu)
+        self.assertIn("Hardware Target : CPU Universal (AVX2)", updated_cpu)
 
         updated_vulkan = batch_manager.update_batch_script_content(sample_bat, {"engine": "VULKAN"})
-        self.assertIn("llama-b9297-bin-win-vulkan-x64", updated_vulkan)
+        res_vulkan = binaries.resolve_model_binary(dev_type="VULKAN", force_generic=True) if HAS_BINARIES_MODULE else {}
+        expected_vulkan_bin = res_vulkan.get("name") or "llama-b11368-bin-win-vulkan-x64"
+        self.assertIn(expected_vulkan_bin, updated_vulkan)
+        self.assertIn("Hardware Target : Vulkan Graphics Acceleration", updated_vulkan)
+
+        # Transition back from CPU to CUDA, also testing that a mismatched binary_folder is discarded
+        sample_bat_cpu = (
+            "@echo off\r\n"
+            "echo  Hardware Target : CPU Universal (AVX2)\r\n"
+            "set \"BINDIR=%BASEDIR%..\\llamaLauncher\\bin\\llama.cpp\\llama-b11368-bin-win-cpu-x64\"\r\n"
+            "llama-server.exe --ctx-size 8192\r\n"
+        )
+        updated_cuda = batch_manager.update_batch_script_content(sample_bat_cpu, {
+            "engine": "CUDA",
+            "binary_folder": "llama-b11368-bin-win-cpu-x64"  # Mismatched binary folder should be discarded
+        })
+        res_cuda = binaries.resolve_model_binary(dev_type="CUDA", force_generic=True) if HAS_BINARIES_MODULE else {}
+        expected_cuda_bin = res_cuda.get("name") or "llama-b9297-bin-win-cuda-x64"
+        self.assertIn(expected_cuda_bin, updated_cuda)
+        self.assertNotIn("llama-b11368-bin-win-cpu-x64", updated_cuda)
+        self.assertIn("Hardware Target : NVIDIA CUDA", updated_cuda)
 
     def test_mtp_toggle_and_batch_sync(self):
         """Verifies that toggling MTP (Multi Token Prediction) properly synchronizes .json and .bat."""
@@ -1266,6 +1356,105 @@ class TestLlamaUpdateChecker(unittest.TestCase):
             self.assertIn("has_update", res)
             self.assertIn("engine", res)
             self.assertEqual(res["engine"], "CUDA")
+
+    def test_check_llama_updates_excludes_cudart_asset(self):
+        """Verifies check_llama_updates filters out cudart-* runtime packages and selects actual llama executable zip."""
+        if not HAS_API_BRIDGE:
+            self.skipTest("ApiBridge not imported.")
+        from unittest.mock import patch, MagicMock
+
+        bridge = ApiBridge()
+        mock_releases = [{
+            "tag_name": "b11368",
+            "name": "llama.cpp b11368",
+            "body": "Release notes for b11368",
+            "html_url": "https://github.com/ggml-org/llama.cpp/releases/tag/b11368",
+            "published_at": "2026-10-04T00:00:00Z",
+            "assets": [
+                {
+                    "name": "cudart-llama-bin-win-cuda-13.1-x64.zip",
+                    "browser_download_url": "https://github.com/example/cudart.zip",
+                    "size": 50000000
+                },
+                {
+                    "name": "llama-b11368-bin-win-cuda-13.1-x64.zip",
+                    "browser_download_url": "https://github.com/example/llama-cuda.zip",
+                    "size": 150000000
+                },
+                {
+                    "name": "llama-b11368-bin-win-cpu-x64.zip",
+                    "browser_download_url": "https://github.com/example/llama-cpu.zip",
+                    "size": 30000000
+                }
+            ]
+        }]
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = mock_releases
+        mock_resp.raise_for_status.return_value = None
+
+        with patch("requests.get", return_value=mock_resp):
+            res = bridge.check_llama_updates("CUDA")
+            self.assertTrue(res["success"])
+            self.assertEqual(res["asset_name"], "llama-b11368-bin-win-cuda-13.1-x64.zip")
+            self.assertNotEqual(res["asset_name"], "cudart-llama-bin-win-cuda-13.1-x64.zip")
+            self.assertEqual(res["latest_build_num"], 11368)
+            self.assertIsInstance(res["current_build_num"], int)
+
+            # Test CPU asset selector
+            res_cpu = bridge.check_llama_updates("CPU")
+            self.assertTrue(res_cpu["success"])
+            self.assertEqual(res_cpu["asset_name"], "llama-b11368-bin-win-cpu-x64.zip")
+
+    def test_check_llama_updates_evaluates_all_releases_for_highest_build(self):
+        """Verifies check_llama_updates does not terminate prematurely and selects the highest build across all releases."""
+        if not HAS_API_BRIDGE:
+            self.skipTest("ApiBridge not imported.")
+        from unittest.mock import patch, MagicMock
+
+        bridge = ApiBridge()
+        # Older release listed first (index 0), newer release listed second (index 1)
+        mock_releases = [
+            {
+                "tag_name": "b11365",
+                "name": "llama.cpp b11365",
+                "body": "Older release notes",
+                "html_url": "https://github.com/ggml-org/llama.cpp/releases/tag/b11365",
+                "published_at": "2026-10-01T00:00:00Z",
+                "assets": [
+                    {
+                        "name": "llama-b11365-bin-win-cpu-x64.zip",
+                        "browser_download_url": "https://github.com/example/b11365-cpu.zip",
+                        "size": 30000000
+                    }
+                ]
+            },
+            {
+                "tag_name": "b11368",
+                "name": "llama.cpp b11368",
+                "body": "Newer release notes",
+                "html_url": "https://github.com/ggml-org/llama.cpp/releases/tag/b11368",
+                "published_at": "2026-10-04T00:00:00Z",
+                "assets": [
+                    {
+                        "name": "llama-b11368-bin-win-cpu-x64.zip",
+                        "browser_download_url": "https://github.com/example/b11368-cpu.zip",
+                        "size": 30000000
+                    }
+                ]
+            }
+        ]
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = mock_releases
+        mock_resp.raise_for_status.return_value = None
+
+        with patch("requests.get", return_value=mock_resp):
+            res = bridge.check_llama_updates("CPU")
+            self.assertTrue(res["success"])
+            self.assertEqual(res["latest_build_num"], 11368)
+            self.assertEqual(res["latest_version"], "b11368")
+            self.assertEqual(res["asset_name"], "llama-b11368-bin-win-cpu-x64.zip")
 
 
 class TestRealEcosystemLiveVerification(unittest.TestCase):

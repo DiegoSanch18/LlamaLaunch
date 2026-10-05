@@ -27,9 +27,9 @@ except ImportError:
 SERVER_EXE_NAME = "llama-server.exe" if sys.platform == "win32" else "llama-server"
 
 # Canonical regex for generic build directory names
-# Example: llama-b9297-bin-win-cuda-x64
+# Example: llama-b9297-bin-win-cuda-x64 or llama-b11368-bin-win-cuda-13.1-x64
 GENERIC_BUILD_REGEX = re.compile(
-    r"llama-(?:b(?P<build>\d+))?-?bin-(?P<os>[a-zA-Z0-9]+)-(?P<backend>[a-zA-Z0-9]+)-(?P<arch>[a-zA-Z0-9]+)",
+    r"llama-(?:b(?P<build>\d+))?-?bin-(?P<os>[a-zA-Z0-9]+)-(?P<backend>[a-zA-Z0-9]+)(?:-[a-zA-Z0-9.]+)?-(?P<arch>[a-zA-Z0-9]+)",
     re.IGNORECASE
 )
 
@@ -241,13 +241,18 @@ def resolve_model_binary(
             dedicated_exe = find_dedicated_binary(target_folder)
             if dedicated_exe:
                 dedicated_dir = dedicated_exe.parent
+                ded_build_num = 0
+                bm = re.search(r"b(\d+)", str(dedicated_exe), re.IGNORECASE)
+                if bm:
+                    ded_build_num = int(bm.group(1))
                 return {
                     "success": True,
                     "binary_path": str(dedicated_exe),
                     "binary_dir": str(dedicated_dir),
                     "binary_type": "CUSTOM_DEDICATED",
                     "is_dedicated": True,
-                    "build": "dedicated",
+                    "build": f"b{ded_build_num}" if ded_build_num > 0 else "dedicated",
+                    "build_num": ded_build_num,
                     "name": f"{target_folder.name} Dedicated Binary",
                     "cuda_dlls_verified": True,
                     "error": None
@@ -265,6 +270,7 @@ def resolve_model_binary(
                 "binary_type": "NONE",
                 "is_dedicated": False,
                 "build": "none",
+                "build_num": 0,
                 "name": "None",
                 "cuda_dlls_verified": False,
                 "error": f"No valid generic llama-server engines found in: {resolved_bin_root}"
@@ -319,6 +325,17 @@ def resolve_model_binary(
             except Exception:
                 dlls_verified = False
 
+        build_num = selected.get("build_num", 0)
+        if not build_num:
+            folder_name = selected.get("name", "") or selected["dir_path"].name
+            m = GENERIC_BUILD_REGEX.match(folder_name)
+            if m and m.group("build"):
+                build_num = int(m.group("build"))
+            else:
+                bm = re.search(r"b(\d+)", folder_name, re.IGNORECASE)
+                if bm:
+                    build_num = int(bm.group(1))
+
         return {
             "success": True,
             "binary_path": str(selected["exe_path"]),
@@ -326,6 +343,7 @@ def resolve_model_binary(
             "binary_type": selected["binary_type"],
             "is_dedicated": False,
             "build": selected["build"],
+            "build_num": build_num,
             "name": selected["name"],
             "cuda_dlls_verified": dlls_verified,
             "error": None
@@ -339,6 +357,7 @@ def resolve_model_binary(
             "binary_type": "NONE",
             "is_dedicated": False,
             "build": "none",
+            "build_num": 0,
             "name": "None",
             "cuda_dlls_verified": False,
             "error": f"Binary resolution error: {str(e)}"

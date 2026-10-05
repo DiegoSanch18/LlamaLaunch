@@ -13,6 +13,14 @@ import shutil
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 
+try:
+    from llamaLauncher.app.backend import binaries
+except ImportError:
+    try:
+        from app.backend import binaries
+    except ImportError:
+        import binaries  # type: ignore
+
 def parse_batch_script(bat_path: Path) -> Dict[str, Any]:
     """
     Parses an existing .bat script to extract inference flags and parameters.
@@ -198,6 +206,19 @@ def parse_batch_script(bat_path: Path) -> Dict[str, Any]:
     config["available_mtp"] = available_mtp
     config["mtp_enabled"] = bool(config.get("spec_draft_model") and config.get("spec_type"))
 
+    # Engine detection from binary folder path or ngl
+    m_bin = re.search(r'llama-(?:b\d+)?-?bin-win-(cuda|vulkan|cpu)(?:-[a-zA-Z0-9.]+)?-x64', content, re.IGNORECASE)
+    if m_bin:
+        b_type = m_bin.group(1).upper()
+        if b_type == "VULKAN":
+            config["engine"] = "VULKAN"
+        elif b_type == "CPU" or config.get("ngl") == 0:
+            config["engine"] = "CPU"
+        else:
+            config["engine"] = "CUDA"
+    else:
+        config["engine"] = "CPU" if config.get("ngl") == 0 else "CUDA"
+
     return config
 
 
@@ -252,20 +273,44 @@ def update_batch_script_content(content: str, updates: Dict[str, Any]) -> str:
         elif re.search(r'-ngl\s+\d+', updated):
             updated = re.sub(r'-ngl\s+\d+', f'-ngl {ngl}', updated)
 
+    target_bin_folder = updates.get("binary_folder")
     if "engine" in updates and updates["engine"]:
         engine_val = str(updates["engine"]).upper().strip()
-        bin_map = {
-            "CPU": "llama-b9283-bin-win-cpu-x64",
-            "VULKAN": "llama-b9297-bin-win-vulkan-x64",
-            "CUDA": "llama-b9297-bin-win-cuda-x64"
-        }
-        target_bin_folder = bin_map.get(engine_val)
-        if target_bin_folder:
-            updated = re.sub(
-                r'llama-(?:b\d+)?-?bin-win-(?:cuda|vulkan|cpu)-x64',
-                target_bin_folder,
-                updated
-            )
+        # If binary_folder was supplied but does not match requested engine, discard it to resolve properly
+        if target_bin_folder and engine_val.lower() not in target_bin_folder.lower():
+            target_bin_folder = None
+
+        if not target_bin_folder:
+            try:
+                res_bin = binaries.resolve_model_binary(dev_type=engine_val, force_generic=True)
+                if res_bin.get("success") and res_bin.get("binary_dir"):
+                    target_bin_folder = Path(res_bin["binary_dir"]).name
+            except Exception:
+                pass
+
+        if not target_bin_folder:
+            bin_map = {
+                "CPU": "llama-b11368-bin-win-cpu-x64",
+                "VULKAN": "llama-b11368-bin-win-vulkan-x64",
+                "CUDA": "llama-b9297-bin-win-cuda-x64"
+            }
+            target_bin_folder = bin_map.get(engine_val)
+
+        # Synchronize echo banner for Hardware Target if present
+        if re.search(r'echo\s+Hardware Target\s*:.*', updated):
+            if engine_val == "CPU":
+                updated = re.sub(r'echo\s+Hardware Target\s*:.*', 'echo  Hardware Target : CPU Universal (AVX2) - Inferencia en Procesador', updated)
+            elif engine_val == "CUDA":
+                updated = re.sub(r'echo\s+Hardware Target\s*:.*', 'echo  Hardware Target : NVIDIA CUDA (GPU Offload / Flash Attention)', updated)
+            elif engine_val == "VULKAN":
+                updated = re.sub(r'echo\s+Hardware Target\s*:.*', 'echo  Hardware Target : Vulkan Graphics Acceleration', updated)
+
+    if target_bin_folder:
+        updated = re.sub(
+            r'llama-(?:b\d+)?-?bin-win-(?:cuda|vulkan|cpu)(?:-[a-zA-Z0-9.]+)?-x64',
+            target_bin_folder,
+            updated
+        )
 
     ck = updates.get("cache_type_k")
     cv = updates.get("cache_type_v")
@@ -436,7 +481,8 @@ def generate_batch_template(
     model_filename: str,
     mmproj_filename: Optional[str] = None,
     family_name: str = "",
-    variant_name: str = ""
+    variant_name: str = "",
+    engine: str = "CUDA"
 ) -> str:
     """
     Generates a calibrated .bat script template matching AI Local workstation standards.
@@ -444,6 +490,18 @@ def generate_batch_template(
     """
     display_title = f"{family_name} {variant_name}".strip() or model_folder.name
     alias_slug = re.sub(r'[^a-zA-Z0-9_\-]', '-', display_title.lower()).strip('-')
+
+    dev_type = (engine or "CUDA").upper().strip()
+    target_bin_folder = "llama-b9297-bin-win-cuda-x64" if dev_type == "CUDA" else ("llama-b11368-bin-win-cpu-x64" if dev_type == "CPU" else "llama-b11368-bin-win-vulkan-x64")
+    try:
+        res = binaries.resolve_model_binary(model_folder=model_folder, dev_type=dev_type, force_generic=True)
+        if res.get("success") and res.get("binary_dir"):
+            target_bin_folder = Path(res["binary_dir"]).name
+    except Exception:
+        pass
+
+    ngl_default = 0 if dev_type == "CPU" else 99
+    header_target = "Inferencia en CPU (AVX2)" if dev_type == "CPU" else ("Aceleración Vulkan" if dev_type == "VULKAN" else "NVIDIA GeForce RTX 5060 Ti (16 GB VRAM)")
 
     mmproj_section = ""
     mmproj_arg = ""
@@ -469,7 +527,7 @@ setlocal enabledelayedexpansion
 
 :: =============================================================
 ::  {display_title} — llama-server (Inferencia Local)
-::  Optimizado para: NVIDIA GeForce RTX 5060 Ti (16 GB VRAM)
+::  Optimizado para: {header_target}
 ::  Endpoint OpenAI compatible: http://localhost:8080/v1
 :: =============================================================
 
@@ -483,20 +541,20 @@ if exist "%BASEDIR%llama.cpp\\llama-server.exe" (
     set "BINDIR=%BASEDIR%..\\llama.cpp"
 ) else if exist "%BASEDIR%..\\..\\llama.cpp\\llama-server.exe" (
     set "BINDIR=%BASEDIR%..\\..\\llama.cpp"
-) else if exist "%BASEDIR%..\\llamaLauncher\\bin\\llama.cpp\\llama-b9297-bin-win-cuda-x64\\llama-server.exe" (
-    set "BINDIR=%BASEDIR%..\\llamaLauncher\\bin\\llama.cpp\\llama-b9297-bin-win-cuda-x64"
-) else if exist "%BASEDIR%..\\..\\llamaLauncher\\bin\\llama.cpp\\llama-b9297-bin-win-cuda-x64\\llama-server.exe" (
-    set "BINDIR=%BASEDIR%..\\..\\llamaLauncher\\bin\\llama.cpp\\llama-b9297-bin-win-cuda-x64"
-) else if exist "%BASEDIR%..\\..\\..\\llamaLauncher\\bin\\llama.cpp\\llama-b9297-bin-win-cuda-x64\\llama-server.exe" (
-    set "BINDIR=%BASEDIR%..\\..\\..\\llamaLauncher\\bin\\llama.cpp\\llama-b9297-bin-win-cuda-x64"
-) else if exist "%BASEDIR%..\\..\\..\\..\\llamaLauncher\\bin\\llama.cpp\\llama-b9297-bin-win-cuda-x64\\llama-server.exe" (
-    set "BINDIR=%BASEDIR%..\\..\\..\\..\\llamaLauncher\\bin\\llama.cpp\\llama-b9297-bin-win-cuda-x64"
+) else if exist "%BASEDIR%..\\llamaLauncher\\bin\\llama.cpp\\{target_bin_folder}\\llama-server.exe" (
+    set "BINDIR=%BASEDIR%..\\llamaLauncher\\bin\\llama.cpp\\{target_bin_folder}"
+) else if exist "%BASEDIR%..\\..\\llamaLauncher\\bin\\llama.cpp\\{target_bin_folder}\\llama-server.exe" (
+    set "BINDIR=%BASEDIR%..\\..\\llamaLauncher\\bin\\llama.cpp\\{target_bin_folder}"
+) else if exist "%BASEDIR%..\\..\\..\\llamaLauncher\\bin\\llama.cpp\\{target_bin_folder}\\llama-server.exe" (
+    set "BINDIR=%BASEDIR%..\\..\\..\\llamaLauncher\\bin\\llama.cpp\\{target_bin_folder}"
+) else if exist "%BASEDIR%..\\..\\..\\..\\llamaLauncher\\bin\\llama.cpp\\{target_bin_folder}\\llama-server.exe" (
+    set "BINDIR=%BASEDIR%..\\..\\..\\..\\llamaLauncher\\bin\\llama.cpp\\{target_bin_folder}"
 ) else if exist "%BASEDIR%..\\Bonsai 2\\llama.cpp\\llama-server.exe" (
     set "BINDIR=%BASEDIR%..\\Bonsai 2\\llama.cpp"
 ) else if exist "%BASEDIR%..\\..\\Bonsai 2\\llama.cpp\\llama-server.exe" (
     set "BINDIR=%BASEDIR%..\\..\\Bonsai 2\\llama.cpp"
-) else if exist "C:\\git\\LlamaLaunch\\llamaLauncher\\bin\\llama.cpp\\llama-b9297-bin-win-cuda-x64\\llama-server.exe" (
-    set "BINDIR=C:\\git\\LlamaLaunch\\llamaLauncher\\bin\\llama.cpp\\llama-b9297-bin-win-cuda-x64"
+) else if exist "C:\\git\\LlamaLaunch\\llamaLauncher\\bin\\llama.cpp\\{target_bin_folder}\\llama-server.exe" (
+    set "BINDIR=C:\\git\\LlamaLaunch\\llamaLauncher\\bin\\llama.cpp\\{target_bin_folder}"
 ) else (
     set "BINDIR="
 )
@@ -510,6 +568,7 @@ if not "%BINDIR%"=="" (
 
 echo =====================================================================
 echo  Iniciando {display_title}
+echo  Hardware Target : {header_target}
 echo  Servidor API    : http://localhost:8080/v1
 echo  Web UI Integrada: http://localhost:8080
 echo =====================================================================
@@ -525,7 +584,7 @@ if not exist "%MODEL%" (
 "%SERVER_EXE%" ^
   --model         "%MODEL%"  ^
   !MMPROJ_FLAG!              ^
-  --n-gpu-layers  99         ^
+  --n-gpu-layers  {ngl_default}         ^
   --flash-attn    on         ^
   --ctx-size      16384      ^
   --ubatch-size   512        ^
@@ -591,7 +650,7 @@ def bat_to_json_dict(bat_path: Path) -> Dict[str, Any]:
         return parsed
 
     ngl = parsed.get("ngl", 99)
-    engine = "CPU" if ngl == 0 else "CUDA"
+    engine = parsed.get("engine") or ("CPU" if ngl == 0 else "CUDA")
 
     folder = bat_path.parent
     if folder.parent.name and folder.parent.name.lower() != "models":
