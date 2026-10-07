@@ -19,7 +19,7 @@ El repositorio interactúa estrechamente con el ecosistema **AI Local**:
 
 > [!IMPORTANT]
 > **Lectura Obligatoria de Hardware:**
-> Antes de modificar parámetros de inferencia, plantillas de scripts `.bat` o configuraciones de offload, consulta [HARDWARE.md](file:///G:/My%20Drive/AI%20Local/HARDWARE.md).
+> Antes de modificar parámetros de inferencia, plantillas de scripts `.bat` o configuraciones de offload, consulta [HARDWARE.md](file:///G:/My%20Drive/AI%20Local/docs/infrastructure/HARDWARE.md).
 
 Los tres nodos del ecosistema tienen restricciones estrictas:
 
@@ -38,7 +38,7 @@ Los tres nodos del ecosistema tienen restricciones estrictas:
 3. **`DIEGOLAPTOP` (Entorno Móvil):**
    - **CPU:** AMD Ryzen 7 7735U (8C/16T, 16 GB RAM unificada).
    - **GPU:** AMD Radeon 680M (Vulkan).
-   - **Backend:** Compilación Vulkan (`llama-*-bin-win-vulkan-x64`). Modelos edge 2B-7B (`Gemma 4 E2B`, `Llama 3.2 3B`).
+   - **Backend:** Compilación Vulkan (`llama-*-bin-win-vulkan-x64`). Modelos edge 2B-7B (`Gemma 4 E2B`, `Qwen 2.5 Coder 3B`).
 
 ---
 
