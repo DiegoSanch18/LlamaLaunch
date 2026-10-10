@@ -33,12 +33,16 @@ RUN mkdir -p /app/llamaLauncher/bin/llama.cpp/llama-bin-ubuntu-x64 && \
     (chmod +x /app/llamaLauncher/bin/llama.cpp/llama-bin-ubuntu-x64/llama-server || true) && \
     rm -f /tmp/llama-b3000-bin-ubuntu-x64.zip
 
+# Configure automatic autostart for LlamaLaunch in XFCE / Webtop
+COPY llamalaunch.desktop /etc/xdg/autostart/llamalaunch.desktop
+RUN mkdir -p /defaults/Desktop && \
+    cp /etc/xdg/autostart/llamalaunch.desktop /defaults/Desktop/llamalaunch.desktop && \
+    chmod +x /etc/xdg/autostart/llamalaunch.desktop /defaults/Desktop/llamalaunch.desktop
+
 # Ports exposed:
 # 3000: Webtop desktop interface
 # 8080: llama-server endpoint
 # 8081: LlamaLaunch Inference Gateway
 EXPOSE 3000 8080 8081
 
-# The container will start the XFCE desktop automatically.
-# Inside the web interface, users can open terminal and run:
-# python3 /app/llamaLauncher/app.py
+# The container will start XFCE and automatically launch LlamaLaunch on the screen.
