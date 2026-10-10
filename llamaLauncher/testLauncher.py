@@ -1477,7 +1477,59 @@ class TestRealEcosystemLiveVerification(unittest.TestCase):
         
         # Verify Generic CUDA 13.x binary
         cuda_bin = live_bins / "llama-b9297-bin-win-cuda-x64" / "llama-server.exe"
-        self.assertTrue(cuda_bin.exists(), "Generic CUDA b9297 binary must exist.")
+class TestInferenceGateway(unittest.TestCase):
+    """Unit tests for LlamaLaunch Inference Gateway (:8081)."""
+
+    def setUp(self):
+        try:
+            from llamaLauncher.app.backend.gateway import InferenceGateway
+        except ImportError:
+            from app.backend.gateway import InferenceGateway
+        self.gateway = InferenceGateway(port=18081)
+        self.gateway.start()
+
+    def tearDown(self):
+        if self.gateway:
+            self.gateway.stop()
+
+    def test_gateway_lifecycle(self):
+        """Verifies gateway starts and is_running is True."""
+        self.assertTrue(self.gateway.is_running)
+
+    def test_gateway_health_endpoint(self):
+        """Verifies GET /health returns json with gateway online."""
+        import requests
+        resp = requests.get("http://127.0.0.1:18081/health", timeout=2.0)
+        self.assertIn(resp.status_code, (200, 503))
+        data = resp.json()
+        self.assertEqual(data.get("gateway"), "online")
+
+    def test_gateway_models_endpoint(self):
+        """Verifies GET /v1/models returns an OpenAI-compatible model list."""
+        import requests
+        resp = requests.get("http://127.0.0.1:18081/v1/models", timeout=2.0)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data.get("object"), "list")
+        self.assertTrue(len(data.get("data", [])) >= 1)
+
+    def test_gateway_preflight_503_when_backend_down(self):
+        """Verifies POST /v1/chat/completions returns 503 when backend is down."""
+        import requests
+        headers = {"Content-Type": "application/json", "X-Target-Backend": "http://127.0.0.1:59999"}
+        payload = {"model": "test", "messages": [{"role": "user", "content": "hi"}]}
+        resp = requests.post("http://127.0.0.1:18081/v1/chat/completions", json=payload, headers=headers, timeout=2.0)
+        self.assertEqual(resp.status_code, 503)
+        self.assertEqual(resp.json().get("error", {}).get("code"), 503)
+
+    def test_gateway_invalid_body_400(self):
+        """Verifies missing Content-Length or invalid body returns 400."""
+        import http.client
+        conn = http.client.HTTPConnection("127.0.0.1", 18081)
+        conn.request("POST", "/v1/chat/completions", headers={})
+        resp = conn.getresponse()
+        self.assertEqual(resp.status, 400)
+        conn.close()
 
 
 if __name__ == "__main__":

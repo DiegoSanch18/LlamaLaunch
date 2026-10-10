@@ -132,9 +132,20 @@ def main():
     # Set the window reference in the API bridge for evaluate_js calls
     bridge.set_window(window)
     
+    # Start background gateway
+    try:
+        gateway = get_gateway()
+        gateway.start()
+    except Exception as e:
+        print(f"[WARN] Could not start Gateway: {e}")
+
     # 3. Graceful termination handler
     def on_closed():
         bridge.stop_server()
+        try:
+            get_gateway().stop()
+        except Exception:
+            pass
         
     window.events.closed += on_closed
     
@@ -150,4 +161,25 @@ def main():
     )
 
 if __name__ == "__main__":
+    if "--gateway-only" in sys.argv:
+        try:
+            from llamaLauncher.app.backend.gateway import get_gateway
+        except ImportError:
+            from app.backend.gateway import get_gateway
+        gw = get_gateway()
+        gw.start()
+        print(f"LlamaLaunch Gateway listening on port {gw.port}. Press Ctrl+C to stop.")
+        import time
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            gw.stop()
+        sys.exit(0)
+
+    try:
+        from llamaLauncher.app.backend.gateway import get_gateway
+    except ImportError:
+        from app.backend.gateway import get_gateway
+
     main()
