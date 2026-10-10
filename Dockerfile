@@ -30,8 +30,11 @@ RUN mkdir -p /app/llamaLauncher/bin/llama.cpp/llama-bin-ubuntu-x64 && \
     unzip llama-b3000-bin-ubuntu-x64.zip -d /app/llamaLauncher/bin/llama.cpp/llama-bin-ubuntu-x64 || true && \
     chmod +x /app/llamaLauncher/bin/llama.cpp/llama-bin-ubuntu-x64/llama-server || true
 
-# Webtop exposes port 3000 (web interface for desktop)
-EXPOSE 3000
+# Ports exposed:
+# 3000: Webtop desktop interface
+# 8080: llama-server endpoint
+# 8081: LlamaLaunch Inference Gateway
+EXPOSE 3000 8080 8081
 
 # The container will start the XFCE desktop automatically.
 # Inside the web interface, users can open terminal and run:

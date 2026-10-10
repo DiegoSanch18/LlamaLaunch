@@ -1,20 +1,51 @@
 version: '3.8'
 
 services:
+  # Opción 1: Suite Completa con GUI Webtop en el navegador (:3000)
   llama-launcher:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: llama-launcher-webtop
     security_opt:
-      - seccomp:unconfined # Opcional pero recomendado para Webtop
+      - seccomp:unconfined # Recomendado para entornos de escritorio Webtop
     environment:
       - PUID=1000
       - PGID=1000
-      - TZ=Etc/UTC
+      - TZ=America/Argentina/Buenos_Aires
+      - GATEWAY_HOST=0.0.0.0
+      - GATEWAY_PORT=8081
+      - DEFAULT_LOCAL_BACKEND=http://127.0.0.1:8080
     ports:
-      - 3000:3000  # Interfaz gráfica (WebTop)
-      - 8080:8080  # Puerto por defecto donde corre llama-server
+      - "3000:3000"  # Interfaz gráfica de escritorio en el navegador (WebTop)
+      - "8080:8080"  # Endpoint de inferencia llama-server
+      - "8081:8081"  # Endpoint del Gateway LlamaLaunch
     volumes:
       - ./models:/app/models
       - ./llamaLauncher/logs:/app/llamaLauncher/logs
-    shm_size: "2gb" # Previene cierres inesperados del navegador en Webtop
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    shm_size: "2gb" # Previene cierres inesperados de WebKit en Webtop
     restart: unless-stopped
+
+  # Opción 2: Gateway Headless ultra-liviano (:8081)
+  # Útil si ejecutas llama-server nativamente en Windows (con CUDA/Vulkan)
+  # y solo requieres el Gateway desacoplado en contenedor.
+  inference-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+    container_name: llamalaunch-inference-gateway
+    environment:
+      - GATEWAY_HOST=0.0.0.0
+      - GATEWAY_PORT=8081
+      - DEFAULT_LOCAL_BACKEND=http://host.docker.internal:8080
+      - DESKTOP_BACKEND_URL=http://host.docker.internal:8080
+      - LAPTOP_BACKEND_URL=http://host.docker.internal:8080
+    ports:
+      - "8081:8081"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    profiles:
+      - gateway-only
