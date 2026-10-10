@@ -1,45 +1,77 @@
 services:
-  # LlamaLaunch Web App (:3000) — Aplicación web limpia directa en el navegador
-  llama-launcher:
+  # ----------------------------------------------------------------------------
+  # 1. Frontend Decouplado (:3000) — Nginx Web Application
+  # ----------------------------------------------------------------------------
+  frontend:
     build:
       context: .
-      dockerfile: Dockerfile
-    container_name: llama-launcher-web
-    environment:
-      - WEB_HOST=0.0.0.0
-      - WEB_PORT=3000
-      - GATEWAY_HOST=0.0.0.0
-      - GATEWAY_PORT=8082
-      - DEFAULT_LOCAL_BACKEND=http://host.docker.internal:8080
-      - DESKTOP_BACKEND_URL=http://host.docker.internal:8080
-      - LAPTOP_BACKEND_URL=http://host.docker.internal:8080
+      dockerfile: Dockerfile.frontend
+    container_name: llamalaunch-frontend
     ports:
-      - "3000:3000"  # Interfaz Web directa de LlamaLaunch (abre limpia en el navegador)
-      - "8080:8080"  # llama-server endpoint
-      - "8082:8082"  # Inference Gateway interno
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      - backend
+    networks:
+      - llamalaunch-net
+    restart: unless-stopped
+
+  # ----------------------------------------------------------------------------
+  # 2. Backend Decouplado (:5000) — Python ApiBridge Microservice
+  # ----------------------------------------------------------------------------
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: llamalaunch-backend
+    environment:
+      - BACKEND_HOST=0.0.0.0
+      - BACKEND_PORT=${BACKEND_PORT:-5000}
+      - GATEWAY_URL=${GATEWAY_URL:-http://gateway:8082}
+      - ATOMIC_PROXY_URL=${ATOMIC_PROXY_URL:-http://host.docker.internal:8000}
+      - DEFAULT_LOCAL_BACKEND=${DEFAULT_LOCAL_BACKEND:-http://host.docker.internal:8080}
+      - DESKTOP_BACKEND_URL=${DESKTOP_BACKEND_URL:-http://host.docker.internal:8080}
+      - LAPTOP_BACKEND_URL=${LAPTOP_BACKEND_URL:-http://host.docker.internal:8080}
+      - TRUENAS_BACKEND_URL=${TRUENAS_BACKEND_URL:-http://truenas.local:8080}
+      - LLAMALAUNCH_MODELS_DIR=/app/models
+    ports:
+      - "${BACKEND_PORT:-5000}:5000"
     volumes:
-      - ./models:/app/models
+      - "${MODELS_DIR:-G:/My Drive/AI Local/models}:/app/models:rw"
       - ./llamaLauncher/logs:/app/llamaLauncher/logs
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    networks:
+      - llamalaunch-net
+      - ai-network
     restart: unless-stopped
 
-  # Opción Headless: Solo el Gateway ultra-liviano (:8081)
-  inference-gateway:
+  # ----------------------------------------------------------------------------
+  # 3. Inference Gateway (:8082) — OpenAI Router para Atomic AI Proxy
+  # ----------------------------------------------------------------------------
+  gateway:
     build:
       context: .
       dockerfile: Dockerfile.gateway
-    container_name: llamalaunch-inference-gateway
+    container_name: llamalaunch-gateway
     environment:
       - GATEWAY_HOST=0.0.0.0
-      - GATEWAY_PORT=${GATEWAY_PORT:-8081}
-      - DEFAULT_LOCAL_BACKEND=http://host.docker.internal:8080
-      - DESKTOP_BACKEND_URL=http://host.docker.internal:8080
-      - LAPTOP_BACKEND_URL=http://host.docker.internal:8080
+      - GATEWAY_PORT=${GATEWAY_PORT:-8082}
+      - DEFAULT_LOCAL_BACKEND=${DEFAULT_LOCAL_BACKEND:-http://host.docker.internal:8080}
+      - DESKTOP_BACKEND_URL=${DESKTOP_BACKEND_URL:-http://host.docker.internal:8080}
+      - LAPTOP_BACKEND_URL=${LAPTOP_BACKEND_URL:-http://host.docker.internal:8080}
+      - TRUENAS_BACKEND_URL=${TRUENAS_BACKEND_URL:-http://truenas.local:8080}
     ports:
-      - "${GATEWAY_PORT:-8081}:${GATEWAY_PORT:-8081}"
+      - "${GATEWAY_PORT:-8082}:${GATEWAY_PORT:-8082}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    networks:
+      - llamalaunch-net
+      - ai-network
     restart: unless-stopped
-    profiles:
-      - gateway-only
+
+networks:
+  llamalaunch-net:
+    driver: bridge
+  ai-network:
+    name: atomic_ai_ai-network
+    external: true

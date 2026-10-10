@@ -235,6 +235,27 @@
                                     </button>
                                 </div>
                             </div>
+
+                            <hr class="divider" style="margin: 12px 0;">
+
+                            <!-- 3-Tier Pipeline Indicators (Engine -> Gateway -> Atomic AI) -->
+                            <div class="pipeline-status-row" style="display: flex; gap: 14px; align-items: center; justify-content: space-between; flex-wrap: wrap;">
+                                <div class="pipeline-badge" id="badge-engine" style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary);">
+                                    <span class="status-dot" id="dot-engine" style="width: 8px; height: 8px; border-radius: 50%; background: #64748b; display: inline-block;"></span>
+                                    <span>Engine: <strong id="lbl-engine-status" style="color: var(--text-primary);">:8080</strong></span>
+                                </div>
+                                <div class="pipeline-badge" id="badge-gateway" style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary);">
+                                    <span class="status-dot" id="dot-gateway" style="width: 8px; height: 8px; border-radius: 50%; background: #64748b; display: inline-block;"></span>
+                                    <span>Gateway: <strong id="lbl-gateway-status" style="color: var(--text-primary);">:8082</strong></span>
+                                </div>
+                                <div class="pipeline-badge" id="badge-atomic" style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary);">
+                                    <span class="status-dot" id="dot-atomic" style="width: 8px; height: 8px; border-radius: 50%; background: #64748b; display: inline-block;"></span>
+                                    <span>Atomic AI: <strong id="lbl-atomic-status" style="color: var(--text-primary);">:8000</strong></span>
+                                </div>
+                                <button type="button" class="btn-secondary" onclick="checkPipelineStatus()" title="Verificar conectividad del pipeline completo" style="font-size: 11px; padding: 4px 10px;">
+                                    🔄 Probar Pipeline
+                                </button>
+                            </div>
                         </div>
 
                         <!-- Logs Console Widget -->

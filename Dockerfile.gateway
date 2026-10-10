@@ -1,11 +1,12 @@
 FROM python:3.11-slim
 
 LABEL maintainer="DiegoSanch18"
-LABEL description="LlamaLaunch Headless Inference Gateway (OpenAI-compatible router :8081)"
+LABEL description="LlamaLaunch Inference Gateway (OpenAI-compatible router :8081 / :8082)"
 
 ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
     GATEWAY_HOST=0.0.0.0 \
-    GATEWAY_PORT=8081 \
+    GATEWAY_PORT=8082 \
     DEFAULT_LOCAL_BACKEND=http://host.docker.internal:8080
 
 WORKDIR /app
@@ -13,9 +14,9 @@ WORKDIR /app
 # Copy minimum backend dependencies required for the gateway
 RUN pip install --no-cache-dir requests
 
-# Copy backend files
-COPY llamaLauncher/app/backend /app/llamaLauncher/app/backend
+# Copy package files
+COPY llamaLauncher /app/llamaLauncher
 
-EXPOSE 8081
+EXPOSE 8081 8082
 
 CMD ["python", "-m", "llamaLauncher.app.backend.gateway"]

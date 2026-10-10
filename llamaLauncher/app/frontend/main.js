@@ -14,11 +14,12 @@ let localModelsSort = { key: "name", direction: "asc" };
 
 // 1. Wait for pywebview bridge initialization or initialize HTTP API client
 function createHttpApiBridge() {
+    const apiBase = window.BACKEND_API_BASE || "";
     return new Proxy({}, {
         get(target, propKey) {
             return async function(...args) {
                 try {
-                    const response = await fetch("/api/call", {
+                    const response = await fetch(apiBase + "/api/call", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ method: propKey, params: args })
@@ -117,7 +118,13 @@ async function initApp() {
     // Delayed start to let the UI settle first
     setTimeout(() => { 
         if (typeof pollServerStatus === 'function') pollServerStatus(); 
+        if (typeof checkPipelineStatus === 'function') checkPipelineStatus();
     }, 1500);
+
+    // Periodic check for Gateway and Atomic AI status every 15s
+    setInterval(() => {
+        if (typeof checkPipelineStatus === 'function') checkPipelineStatus();
+    }, 15000);
 
     appendLogLine("[SYSTEM] AI Local Desktop inference suite is ready.");
 }
@@ -157,5 +164,57 @@ function appendLogLine(text, type = "system") {
     }
     if (terminalScrolledToBottom) {
         terminal.scrollTop = terminal.scrollHeight;
+    }
+}
+
+// 3. Pipeline Connectivity Status Checker (Engine -> Gateway -> Atomic AI)
+async function checkPipelineStatus() {
+    const apiBase = window.BACKEND_API_BASE || "";
+    
+    // Check Engine (:8080 or active port)
+    const dotEngine = document.getElementById("dot-engine");
+    const lblEngine = document.getElementById("lbl-engine-status");
+    const statusTextEl = document.getElementById("lbl-status-text");
+    if (dotEngine && lblEngine) {
+        const isRunning = statusTextEl && (statusTextEl.innerText === "RUNNING");
+        dotEngine.style.background = isRunning ? "var(--accent-emerald)" : "#64748b";
+        lblEngine.innerText = isRunning ? ":8080 (Active)" : ":8080 (Idle)";
+    }
+
+    // Check Gateway (:8082 / :8081)
+    try {
+        const gwRes = await fetch(apiBase + "/api/gateway/status").then(r => r.json()).catch(() => ({ reachable: false }));
+        const dotGw = document.getElementById("dot-gateway");
+        const lblGw = document.getElementById("lbl-gateway-status");
+        if (dotGw && lblGw) {
+            if (gwRes.reachable) {
+                dotGw.style.background = gwRes.backend_healthy ? "var(--accent-emerald)" : "var(--accent-amber)";
+                const portStr = gwRes.gateway_url ? gwRes.gateway_url.split(':').pop() : '8082';
+                lblGw.innerText = `:${portStr} (${gwRes.backend_healthy ? 'Ready' : 'Standby'})`;
+            } else {
+                dotGw.style.background = "var(--accent-rose)";
+                lblGw.innerText = "Offline";
+            }
+        }
+    } catch (e) {
+        console.warn("[Pipeline] Could not check Gateway status", e);
+    }
+
+    // Check Atomic AI Cognitive Proxy (:8000)
+    try {
+        const atRes = await fetch(apiBase + "/api/atomic/status").then(r => r.json()).catch(() => ({ reachable: false }));
+        const dotAt = document.getElementById("dot-atomic");
+        const lblAt = document.getElementById("lbl-atomic-status");
+        if (dotAt && lblAt) {
+            if (atRes.reachable) {
+                dotAt.style.background = "var(--accent-emerald)";
+                lblAt.innerText = ":8000 (Online)";
+            } else {
+                dotAt.style.background = "var(--accent-rose)";
+                lblAt.innerText = "Offline";
+            }
+        }
+    } catch (e) {
+        console.warn("[Pipeline] Could not check Atomic AI status", e);
     }
 }

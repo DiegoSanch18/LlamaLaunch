@@ -54,14 +54,22 @@ python llamaLauncher/app.py
 ```
 This opens the native desktop application window running the Slate Cyberpunk dark UI.
 
-#### Docker / Headless Server Mode (TrueNAS / Ubuntu)
-```bash
-docker-compose up -d
+#### Docker Decoupled Mode (Frontend :3000, Backend :5000, Gateway :8082)
+The suite supports fully decoupled containerized deployment with Nginx frontend and Python backend microservices:
+
+```powershell
+# Usando el script automatizado (verifica montura G:\ y red Atomic AI):
+.\run-docker.ps1
+
+# O mediante Docker Compose directamente:
+docker compose up -d --build
 ```
-Access the desktop UI in your browser at `http://<SERVER_IP>:3000`, open the terminal inside WebTop, and run:
-```bash
-python3 /app/llamaLauncher/app.py
-```
+
+- **Frontend Web UI (`:3000`)**: `http://localhost:3000` (Interfaz web completa servida por Nginx con proxy reverso transparente a `/api/`).
+- **Backend API (`:5000`)**: `http://localhost:5000/api/health` (Microservicio Python con RPC `/api/call` y escaneo de modelos).
+- **Inference Gateway (`:8082`)**: `http://localhost:8082/v1/models` (Enrutador OpenAI-compatible para Atomic AI y clientes externos).
+- **Modelos Vinculados**: Montura directa desde `G:\My Drive\AI Local\models` hacia `/app/models`.
+- **Integración Cognitiva**: Conectado a la red Docker `atomic_ai_ai-network` para comunicación directa con el proxy de tareas atómicas.
 
 ---
 
@@ -124,14 +132,21 @@ LlamaLaunch/
 ├── AGENTS.md                  # Agent governance & operational guide
 ├── DESIGN.md                  # UX/UI, API design & backend testing specification
 ├── README.md                  # Project documentation & usage guide
-├── Dockerfile                 # WebTop container specification
-├── docker-compose.yml         # Container deployment configuration
+├── Dockerfile.frontend        # Decoupled Nginx frontend image (:3000)
+├── Dockerfile.backend         # Decoupled Python backend API image (:5000)
+├── Dockerfile.gateway         # Decoupled OpenAI Inference Gateway image (:8082)
+├── docker-compose.yml         # Container orchestration across 3 tiers & networks
+├── run-docker.ps1             # Automated PowerShell deployment script
+├── run-docker.bat             # Automated Windows Batch deployment script
 └── llamaLauncher/
     ├── app.py                 # Desktop application entrypoint (pywebview)
-    ├── testLauncher.py        # Automated test suite
+    ├── backend_server.py      # Standalone HTTP backend service (:5000)
+    ├── server.py              # Legacy web server entrypoint
+    ├── testLauncher.py        # Automated test suite (63 unit tests)
     ├── app/
     │   ├── backend/           # Core Python backend modules
-    │   │   ├── api.py         # ApiBridge (JS-Python facade)
+    │   │   ├── api.py         # ApiBridge (JS-Python facade & RPC)
+    │   │   ├── gateway.py     # InferenceGateway OpenAI-compatible router
     │   │   ├── batch_manager.py # .bat script parsing, template generation & backups
     │   │   ├── binaries.py    # Priority resolver for dedicated & generic llama-server binaries
     │   │   ├── config.py      # Offload & PolarQuant KV cache profiles
@@ -139,9 +154,9 @@ LlamaLaunch/
     │   │   ├── manager.py     # ProcessManager & download manager
     │   │   └── models.py      # Hierarchical model & batch script scanner
     │   └── frontend/          # Webview UI (HTML5, CSS3, Vanilla JS)
-    │       ├── index.html     # Semantic dashboard markup
+    │       ├── index.html     # Semantic dashboard markup with pipeline indicators
     │       ├── style.css      # Slate Cyberpunk dark styling
-    │       ├── main.js        # Pywebview lifecycle coordinator
+    │       ├── main.js        # Webview lifecycle & pipeline connectivity coordinator
     │       ├── manager.js     # Server controls & batch orchestration
     │       └── downloader.js  # Hugging Face downloader UI
     └── bin/llama.cpp/         # Precompiled llama.cpp binaries
