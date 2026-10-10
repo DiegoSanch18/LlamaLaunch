@@ -12,19 +12,45 @@ let activeDownloadCategory = "";
 let isPolling = false; // Guard flag to prevent concurrent poll API calls
 let localModelsSort = { key: "name", direction: "asc" };
 
-// 1. Wait for pywebview bridge initialization
+// 1. Wait for pywebview bridge initialization or initialize HTTP API client
+function createHttpApiBridge() {
+    return new Proxy({}, {
+        get(target, propKey) {
+            return async function(...args) {
+                try {
+                    const response = await fetch("/api/call", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ method: propKey, params: args })
+                    });
+                    if (!response.ok) {
+                        const err = await response.json().catch(() => ({}));
+                        throw new Error(err.error || `HTTP ${response.status}`);
+                    }
+                    return await response.json();
+                } catch (err) {
+                    console.error(`[API Error] ${propKey}:`, err);
+                    return { success: false, message: err.message };
+                }
+            };
+        }
+    });
+}
+
 window.addEventListener('pywebviewready', () => {
     api = window.pywebview.api;
     initApp();
 });
 
-// Fallback if not running inside pywebview (debugging)
+// If running in a regular web browser (Docker / Web mode)
 window.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => {
-        if (!api) {
-            console.warn("[SYSTEM] 'pywebview' communication bridge not detected. Running in standalone browser mock mode.");
+        if (!api && (!window.pywebview || !window.pywebview.api)) {
+            console.log("[SYSTEM] Connecting via Web Browser HTTP Bridge (/api/call)...");
+            api = createHttpApiBridge();
+            initApp();
         }
-    }, 2000);
+    }, 150);
 });
 
 async function initApp() {

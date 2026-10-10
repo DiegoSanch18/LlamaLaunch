@@ -1,48 +1,28 @@
-FROM lscr.io/linuxserver/webtop:ubuntu-xfce
+FROM python:3.11-slim
 
-# Set environment variables for non-interactive installs
-ENV DEBIAN_FRONTEND=noninteractive
+LABEL maintainer="DiegoSanch18"
+LABEL description="LlamaLaunch Web Suite (:3000) - Native Browser App without X11/Linux Desktop"
 
-# Install Python and dependencies for PyWebView on Ubuntu (GTK / WebKit2 4.1)
-RUN apt-get update && apt-get install -y \
-    python3 \
-    python3-pip \
-    python3-tk \
-    python3-gi \
-    gir1.2-webkit2-4.1 \
-    libwebkit2gtk-4.1-0 \
-    wget \
-    unzip \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    WEB_HOST=0.0.0.0 \
+    WEB_PORT=3000 \
+    GATEWAY_HOST=0.0.0.0 \
+    GATEWAY_PORT=8082 \
+    DEFAULT_LOCAL_BACKEND=http://host.docker.internal:8080
 
-# Set up working directory
 WORKDIR /app
 
-# Copy the application files
+# Install lightweight dependencies (bottle, requests, psutil)
+RUN pip install --no-cache-dir bottle requests psutil
+
+# Copy application files
 COPY . /app/
 
-# Install python requirements (pywebview, requests, psutil)
-RUN pip3 install --no-cache-dir pywebview requests psutil
-
-# Download Linux build of llama-server (fallback if not present)
-RUN mkdir -p /app/llamaLauncher/bin/llama.cpp/llama-bin-ubuntu-x64 && \
-    cd /tmp && \
-    (wget https://github.com/ggerganov/llama.cpp/releases/download/b3000/llama-b3000-bin-ubuntu-x64.zip || true) && \
-    (unzip -o llama-b3000-bin-ubuntu-x64.zip -d /app/llamaLauncher/bin/llama.cpp/llama-bin-ubuntu-x64 || true) && \
-    (chmod +x /app/llamaLauncher/bin/llama.cpp/llama-bin-ubuntu-x64/llama-server || true) && \
-    rm -f /tmp/llama-b3000-bin-ubuntu-x64.zip
-
-# Configure automatic autostart for LlamaLaunch in XFCE / Webtop
-COPY llamalaunch.desktop /etc/xdg/autostart/llamalaunch.desktop
-RUN mkdir -p /defaults/Desktop && \
-    cp /etc/xdg/autostart/llamalaunch.desktop /defaults/Desktop/llamalaunch.desktop && \
-    chmod +x /etc/xdg/autostart/llamalaunch.desktop /defaults/Desktop/llamalaunch.desktop
-
-# Ports exposed:
-# 3000: Webtop desktop interface
+# Expose ports:
+# 3000: Web Application UI (Direct browser access)
 # 8080: llama-server endpoint
-# 8081: LlamaLaunch Inference Gateway
-EXPOSE 3000 8080 8081
+# 8082: LlamaLaunch Inference Gateway
+EXPOSE 3000 8080 8082
 
-# The container will start XFCE and automatically launch LlamaLaunch on the screen.
+CMD ["python", "llamaLauncher/server.py"]

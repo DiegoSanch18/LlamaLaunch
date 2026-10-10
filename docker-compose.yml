@@ -1,34 +1,30 @@
 services:
-  # Opción 1: Suite Completa con GUI Webtop en el navegador (:3000)
+  # LlamaLaunch Web App (:3000) — Aplicación web limpia directa en el navegador
   llama-launcher:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: llama-launcher-webtop
-    security_opt:
-      - seccomp:unconfined # Recomendado para entornos de escritorio Webtop
+    container_name: llama-launcher-web
     environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=America/Argentina/Buenos_Aires
+      - WEB_HOST=0.0.0.0
+      - WEB_PORT=3000
       - GATEWAY_HOST=0.0.0.0
       - GATEWAY_PORT=8082
-      - DEFAULT_LOCAL_BACKEND=http://127.0.0.1:8080
+      - DEFAULT_LOCAL_BACKEND=http://host.docker.internal:8080
+      - DESKTOP_BACKEND_URL=http://host.docker.internal:8080
+      - LAPTOP_BACKEND_URL=http://host.docker.internal:8080
     ports:
-      - "3000:3000"  # Interfaz gráfica de escritorio en el navegador (WebTop)
-      - "8080:8080"  # Endpoint de inferencia llama-server interno en contenedor
-      - "8082:8082"  # Gateway interno (mapeado a 8082 para no colisionar con atomic-ai-gateway en 8081)
+      - "3000:3000"  # Interfaz Web directa de LlamaLaunch (abre limpia en el navegador)
+      - "8080:8080"  # llama-server endpoint
+      - "8082:8082"  # Inference Gateway interno
     volumes:
       - ./models:/app/models
       - ./llamaLauncher/logs:/app/llamaLauncher/logs
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    shm_size: "2gb" # Previene cierres inesperados de WebKit en Webtop
     restart: unless-stopped
 
-  # Opción 2: Gateway Headless ultra-liviano (:8081 / :8082)
-  # Útil si ejecutas llama-server nativamente en Windows (con CUDA/Vulkan)
-  # y solo requieres el Gateway desacoplado en contenedor.
+  # Opción Headless: Solo el Gateway ultra-liviano (:8081)
   inference-gateway:
     build:
       context: .
