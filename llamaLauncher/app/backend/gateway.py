@@ -202,12 +202,15 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
 
         try:
             content_length = int(content_length_header)
+            if content_length <= 0:
+                self._send_json(400, {"error": {"message": "Request body cannot be empty or negative", "code": 400}})
+                return
             body_bytes = self.rfile.read(content_length)
         except Exception as e:
             self._send_json(400, {"error": {"message": f"Invalid request body or length: {e}", "code": 400}})
             return
 
-        if content_length <= 0 or not body_bytes:
+        if not body_bytes:
             self._send_json(400, {"error": {"message": "Request body cannot be empty", "code": 400}})
             return
 

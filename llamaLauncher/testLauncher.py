@@ -1523,13 +1523,48 @@ class TestInferenceGateway(unittest.TestCase):
         self.assertEqual(resp.json().get("error", {}).get("code"), 503)
 
     def test_gateway_invalid_body_400(self):
-        """Verifies missing Content-Length or invalid body returns 400."""
+        """Verifies missing Content-Length, negative length, or invalid body returns 400."""
         import http.client
-        conn = http.client.HTTPConnection("127.0.0.1", 18081)
+        # 1. Missing Content-Length
+        conn = http.client.HTTPConnection("127.0.0.1", 18081, timeout=3.0)
         conn.request("POST", "/v1/chat/completions", headers={})
         resp = conn.getresponse()
         self.assertEqual(resp.status, 400)
         conn.close()
+
+        # 2. Negative Content-Length (must not hang on socket read(-1))
+        conn = http.client.HTTPConnection("127.0.0.1", 18081, timeout=3.0)
+        conn.request("POST", "/v1/chat/completions", headers={"Content-Length": "-1"})
+        resp = conn.getresponse()
+        self.assertEqual(resp.status, 400)
+        conn.close()
+
+        # 3. Zero Content-Length
+        conn = http.client.HTTPConnection("127.0.0.1", 18081, timeout=3.0)
+        conn.request("POST", "/v1/chat/completions", headers={"Content-Length": "0"})
+        resp = conn.getresponse()
+        self.assertEqual(resp.status, 400)
+        conn.close()
+
+    def test_gateway_negative_content_length_returns_400_immediately(self):
+        """Verifies that Content-Length: -1 returns 400 Bad Request immediately without timing out or hanging."""
+        import http.client
+        import json
+        import time
+
+        start = time.perf_counter()
+        conn = http.client.HTTPConnection("127.0.0.1", 18081, timeout=2.0)
+        conn.request("POST", "/v1/chat/completions", headers={"Content-Length": "-1"})
+        resp = conn.getresponse()
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        body = resp.read().decode("utf-8")
+        conn.close()
+
+        self.assertEqual(resp.status, 400)
+        self.assertLess(elapsed_ms, 200, f"Request took too long ({elapsed_ms:.2f}ms), potential socket hang!")
+        data = json.loads(body)
+        self.assertEqual(data.get("error", {}).get("code"), 400)
+        self.assertIn("empty or negative", data.get("error", {}).get("message", ""))
 
 
 if __name__ == "__main__":
