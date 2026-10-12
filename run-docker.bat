@@ -20,7 +20,7 @@ if %ERRORLEVEL% equ 0 (
     echo ==============================================================================
     echo   - Frontend UI (Nginx)   : http://localhost:3000
     echo   - Backend API (Bottle)  : http://localhost:5000
-    echo   - Inference Gateway     : http://localhost:8082
+    echo   - Inference Gateway     : http://localhost:8081
     echo   - Modelos Vinculados    : G:\My Drive\AI Local\models
     echo ==============================================================================
 ) else (

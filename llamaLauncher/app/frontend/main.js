@@ -181,7 +181,7 @@ async function checkPipelineStatus() {
         lblEngine.innerText = isRunning ? ":8080 (Active)" : ":8080 (Idle)";
     }
 
-    // Check Gateway (:8082 / :8081)
+    // Check Gateway (:8081)
     try {
         const gwRes = await fetch(apiBase + "/api/gateway/status").then(r => r.json()).catch(() => ({ reachable: false }));
         const dotGw = document.getElementById("dot-gateway");
@@ -189,7 +189,7 @@ async function checkPipelineStatus() {
         if (dotGw && lblGw) {
             if (gwRes.reachable) {
                 dotGw.style.background = gwRes.backend_healthy ? "var(--accent-emerald)" : "var(--accent-amber)";
-                const portStr = gwRes.gateway_url ? gwRes.gateway_url.split(':').pop() : '8082';
+                const portStr = gwRes.gateway_url ? gwRes.gateway_url.split(':').pop() : '8081';
                 lblGw.innerText = `:${portStr} (${gwRes.backend_healthy ? 'Ready' : 'Standby'})`;
             } else {
                 dotGw.style.background = "var(--accent-rose)";

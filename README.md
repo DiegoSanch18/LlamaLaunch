@@ -54,7 +54,7 @@ python llamaLauncher/app.py
 ```
 This opens the native desktop application window running the Slate Cyberpunk dark UI.
 
-#### Docker Decoupled Mode (Frontend :3000, Backend :5000, Gateway :8082)
+#### Docker Decoupled Mode (Frontend :3000, Backend :5000, Gateway :8081)
 The suite supports fully decoupled containerized deployment with Nginx frontend and Python backend microservices:
 
 ```powershell
@@ -67,7 +67,7 @@ docker compose up -d --build
 
 - **Frontend Web UI (`:3000`)**: `http://localhost:3000` (Interfaz web completa servida por Nginx con proxy reverso transparente a `/api/`).
 - **Backend API (`:5000`)**: `http://localhost:5000/api/health` (Microservicio Python con RPC `/api/call` y escaneo de modelos).
-- **Inference Gateway (`:8082`)**: `http://localhost:8082/v1/models` (Enrutador OpenAI-compatible para Atomic AI y clientes externos).
+- **Inference Gateway (`:8081`)**: `http://localhost:8081/v1/models` (Enrutador OpenAI-compatible para Atomic AI y clientes externos).
 - **Modelos Vinculados**: Montura directa desde `G:\My Drive\AI Local\models` hacia `/app/models`.
 - **Integración Cognitiva**: Conectado a la red Docker `atomic_ai_ai-network` para comunicación directa con el proxy de tareas atómicas.
 
@@ -134,7 +134,7 @@ LlamaLaunch/
 ├── README.md                  # Project documentation & usage guide
 ├── Dockerfile.frontend        # Decoupled Nginx frontend image (:3000)
 ├── Dockerfile.backend         # Decoupled Python backend API image (:5000)
-├── Dockerfile.gateway         # Decoupled OpenAI Inference Gateway image (:8082)
+├── Dockerfile.gateway         # Decoupled OpenAI Inference Gateway image (:8081)
 ├── docker-compose.yml         # Container orchestration across 3 tiers & networks
 ├── run-docker.ps1             # Automated PowerShell deployment script
 ├── run-docker.bat             # Automated Windows Batch deployment script

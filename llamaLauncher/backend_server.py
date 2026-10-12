@@ -7,7 +7,7 @@ over HTTP on port 5000, fully decoupled from the Nginx frontend (:3000).
 Provides:
 - POST /api/call               : JSON-RPC dispatcher for ApiBridge methods
 - GET  /api/health             : Backend health check and models summary
-- GET  /api/gateway/status     : Health status probe for LlamaLaunch Gateway (:8081 / :8082)
+- GET  /api/gateway/status     : Health status probe for LlamaLaunch Gateway (:8081)
 - GET  /api/atomic/status      : Health status probe for Atomic AI Cognitive Proxy (:8000)
 - POST /api/atomic/test        : End-to-end verification through Atomic AI & Gateway pipeline
 """
@@ -47,7 +47,7 @@ bridge.set_window(WebWindowShim())
 # Configuration from environment
 BACKEND_HOST = os.getenv("BACKEND_HOST", "0.0.0.0")
 BACKEND_PORT = int(os.getenv("BACKEND_PORT", "5000"))
-GATEWAY_URL = os.getenv("GATEWAY_URL", "http://gateway:8082").rstrip("/")
+GATEWAY_URL = os.getenv("GATEWAY_URL", "http://gateway:8081").rstrip("/")
 ATOMIC_PROXY_URL = os.getenv("ATOMIC_PROXY_URL", "http://host.docker.internal:8000").rstrip("/")
 DEFAULT_LOCAL_BACKEND = os.getenv("DEFAULT_LOCAL_BACKEND", "http://host.docker.internal:8080").rstrip("/")
 
@@ -126,7 +126,7 @@ def health():
 
 
 # ------------------------------------------------------------------------------
-# 4. Gateway Integration Status (:8081 / :8082)
+# 4. Gateway Integration Status (:8081)
 # ------------------------------------------------------------------------------
 @app.route("/api/gateway/status")
 def gateway_status():
@@ -170,31 +170,35 @@ def atomic_status():
         candidates = [explicit_url.strip()]
     else:
         candidates = [ATOMIC_PROXY_URL]
-        if "host.docker.internal" not in ATOMIC_PROXY_URL:
+        if "atomic-proxy" not in ATOMIC_PROXY_URL:
             candidates.append("http://atomic-proxy:8000")
+            candidates.append("http://atomic-ai-proxy:8000")
+            candidates.append("http://host.docker.internal:8005")
             candidates.append("http://host.docker.internal:8000")
 
     for url in candidates:
         try:
-            # Check OpenAPI / models / health endpoint of Atomic AI
-            resp = requests.get(f"{url}/health", timeout=0.3)
+            # Check OpenAI /v1/models endpoint of Atomic AI
+            resp = requests.get(f"{url}/v1/models", timeout=0.5)
+            if resp.status_code == 200:
+                return {
+                    "status": "online",
+                    "reachable": True,
+                    "atomic_url": url,
+                    "models": resp.json()
+                }
+        except Exception:
+            pass
+
+        try:
+            resp = requests.get(f"{url}/health", timeout=0.5)
             if resp.status_code == 200:
                 data = resp.json()
                 data["reachable"] = True
                 data["atomic_url"] = url
                 return data
         except Exception:
-            try:
-                resp = requests.get(f"{url}/v1/models", timeout=0.3)
-                if resp.status_code == 200:
-                    return {
-                        "status": "online",
-                        "reachable": True,
-                        "atomic_url": url,
-                        "models": resp.json()
-                    }
-            except Exception:
-                continue
+            continue
 
     return {
         "status": "offline",

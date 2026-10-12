@@ -28,7 +28,7 @@ if ($LASTEXITCODE -eq 0) {
     Write-Host "======================================================================" -ForegroundColor Green
     Write-Host "  - Frontend UI (Nginx)   : http://localhost:3000" -ForegroundColor White
     Write-Host "  - Backend API (Bottle)  : http://localhost:5000" -ForegroundColor White
-    Write-Host "  - Inference Gateway     : http://localhost:8082" -ForegroundColor White
+    Write-Host "  - Inference Gateway     : http://localhost:8081" -ForegroundColor White
     Write-Host "  - Modelos Vinculados    : G:\My Drive\AI Local\models (/app/models)" -ForegroundColor White
     Write-Host "  - Interconexión         : Atomic AI Proxy (:8000) <-> Gateway" -ForegroundColor White
     Write-Host "======================================================================" -ForegroundColor Green
