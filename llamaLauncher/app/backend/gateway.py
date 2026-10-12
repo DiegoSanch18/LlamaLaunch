@@ -33,12 +33,12 @@ except ImportError:
 
 logger = logging.getLogger("LlamaLaunch.Gateway")
 
-DEFAULT_GATEWAY_HOST = "127.0.0.1"
-DEFAULT_GATEWAY_PORT = 8081
-DEFAULT_LOCAL_BACKEND = "http://127.0.0.1:8080"
+DEFAULT_GATEWAY_HOST = os.getenv("GATEWAY_HOST", "127.0.0.1")
+DEFAULT_GATEWAY_PORT = int(os.getenv("GATEWAY_PORT", "8081"))
+DEFAULT_LOCAL_BACKEND = os.getenv("DEFAULT_LOCAL_BACKEND", "http://127.0.0.1:8080")
 
 LAN_NODE_ROUTES = {
-    "desktop": "http://127.0.0.1:8080",
+    "desktop": os.getenv("DESKTOP_BACKEND_URL", "http://127.0.0.1:8080"),
     "laptop": os.getenv("LAPTOP_BACKEND_URL", "http://127.0.0.1:8080"),
     "truenas": os.getenv("TRUENAS_BACKEND_URL", "http://truenas.local:8080"),
 }
@@ -322,17 +322,19 @@ _global_gateway: Optional[InferenceGateway] = None
 def get_gateway() -> InferenceGateway:
     global _global_gateway
     if _global_gateway is None:
+        host = os.getenv("GATEWAY_HOST", DEFAULT_GATEWAY_HOST)
         port = int(os.getenv("GATEWAY_PORT", DEFAULT_GATEWAY_PORT))
-        _global_gateway = InferenceGateway(port=port)
+        _global_gateway = InferenceGateway(host=host, port=port)
     return _global_gateway
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_GATEWAY_PORT
-    gw = InferenceGateway(port=port)
+    host = os.getenv("GATEWAY_HOST", DEFAULT_GATEWAY_HOST)
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else int(os.getenv("GATEWAY_PORT", DEFAULT_GATEWAY_PORT))
+    gw = InferenceGateway(host=host, port=port)
     gw.start()
-    print(f"Gateway running at http://{DEFAULT_GATEWAY_HOST}:{port}. Press Ctrl+C to stop.")
+    print(f"Gateway running at http://{host}:{port}. Press Ctrl+C to stop.")
     try:
         while True:
             import time

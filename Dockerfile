@@ -1,38 +1,28 @@
-FROM lscr.io/linuxserver/webtop:ubuntu-xfce
+FROM python:3.11-slim
 
-# Set environment variables for non-interactive installs
-ENV DEBIAN_FRONTEND=noninteractive
+LABEL maintainer="DiegoSanch18"
+LABEL description="LlamaLaunch Web Suite (:3000) - Native Browser App without X11/Linux Desktop"
 
-# Install Python and dependencies for PyWebView
-RUN apt-get update && apt-get install -y \
-    python3 \
-    python3-pip \
-    python3-tk \
-    libwebkit2gtk-4.0-37 \
-    gir1.2-webkit2-4.0 \
-    wget \
-    unzip \
-    && rm -rf /var/lib/apt/lists/*
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    WEB_HOST=0.0.0.0 \
+    WEB_PORT=3000 \
+    GATEWAY_HOST=0.0.0.0 \
+    GATEWAY_PORT=8082 \
+    DEFAULT_LOCAL_BACKEND=http://host.docker.internal:8080
 
-# Set up working directory
 WORKDIR /app
 
-# Copy the application files
+# Install lightweight dependencies (bottle, requests, psutil)
+RUN pip install --no-cache-dir bottle requests psutil
+
+# Copy application files
 COPY . /app/
 
-# Install python requirements (pywebview, requests, psutil)
-RUN pip3 install pywebview requests psutil
+# Expose ports:
+# 3000: Web Application UI (Direct browser access)
+# 8080: llama-server endpoint
+# 8082: LlamaLaunch Inference Gateway
+EXPOSE 3000 8080 8082
 
-# Download Linux build of llama-server (fallback if not present)
-RUN mkdir -p /app/llamaLauncher/bin/llama.cpp/llama-bin-ubuntu-x64 && \
-    cd /tmp && \
-    wget https://github.com/ggerganov/llama.cpp/releases/download/b3000/llama-b3000-bin-ubuntu-x64.zip || true && \
-    unzip llama-b3000-bin-ubuntu-x64.zip -d /app/llamaLauncher/bin/llama.cpp/llama-bin-ubuntu-x64 || true && \
-    chmod +x /app/llamaLauncher/bin/llama.cpp/llama-bin-ubuntu-x64/llama-server || true
-
-# Webtop exposes port 3000 (web interface for desktop)
-EXPOSE 3000
-
-# The container will start the XFCE desktop automatically.
-# Inside the web interface, users can open terminal and run:
-# python3 /app/llamaLauncher/app.py
+CMD ["python", "llamaLauncher/server.py"]

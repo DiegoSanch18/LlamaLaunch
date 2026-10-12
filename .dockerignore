@@ -1,8 +1,16 @@
 __pycache__
 *.pyc
+*.pyo
+*.pyd
 logs/
+llamaLauncher/logs/
 models/
 build/
 dist/
 .git
 .gitignore
+.venv
+venv
+.agents
+llamaLauncher/bin/
+*.bat

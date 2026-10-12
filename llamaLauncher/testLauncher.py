@@ -1567,6 +1567,68 @@ class TestInferenceGateway(unittest.TestCase):
         self.assertIn("empty or negative", data.get("error", {}).get("message", ""))
 
 
+class TestDecoupledBackendServer(unittest.TestCase):
+    """Unit tests for LlamaLaunch Decoupled Backend API server (:5000)."""
+
+    @classmethod
+    def setUpClass(cls):
+        global requests
+        import requests
+        import threading
+        from socketserver import ThreadingMixIn
+        from wsgiref.simple_server import make_server, WSGIServer
+        from llamaLauncher.backend_server import app
+
+        class ThreadedWSGIServer(ThreadingMixIn, WSGIServer):
+            daemon_threads = True
+
+        cls.server = make_server("127.0.0.1", 15000, app, server_class=ThreadedWSGIServer)
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def test_backend_health(self):
+        """Verifies GET /api/health returns ok status and service name."""
+        resp = requests.get("http://127.0.0.1:15000/api/health", timeout=2.0)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data.get("status"), "ok")
+        self.assertEqual(data.get("service"), "LlamaLaunch Decoupled Backend")
+
+    def test_backend_cors_headers(self):
+        """Verifies OPTIONS /api/call responds with CORS headers."""
+        resp = requests.options("http://127.0.0.1:15000/api/call", timeout=2.0)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.headers.get("Access-Control-Allow-Origin"), "*")
+
+    def test_backend_api_call_rpc(self):
+        """Verifies POST /api/call executes ApiBridge methods via JSON-RPC."""
+        payload = {"method": "get_hardware_info", "params": []}
+        resp = requests.post("http://127.0.0.1:15000/api/call", json=payload, timeout=5.0)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertIn("physical_cores", data)
+
+    def test_backend_gateway_status_offline_fallback(self):
+        """Verifies GET /api/gateway/status returns unreachable when target is down."""
+        resp = requests.get("http://127.0.0.1:15000/api/gateway/status?url=http://127.0.0.1:9999", timeout=2.0)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertFalse(data.get("reachable"))
+
+    def test_backend_atomic_status_offline_fallback(self):
+        """Verifies GET /api/atomic/status returns unreachable when target is down."""
+        resp = requests.get("http://127.0.0.1:15000/api/atomic/status?url=http://127.0.0.1:9999", timeout=2.0)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertFalse(data.get("reachable"))
+
+
 if __name__ == "__main__":
     unittest.main()
+
 
