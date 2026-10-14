@@ -115,6 +115,30 @@ docker compose up -d --build
 
 ---
 
+### 6. Integración con Clientes Externos (OpenCode, OpenClaw, Hermes, Cursor, etc.)
+
+Cualquier cliente o IDE compatible con el protocolo OpenAI puede consumir la suite local. Existen dos vías principales de consumo según el tipo de tarea:
+
+| Vía de Conexión | Base URL a Configurar | Puerto Host | Descripción y Comportamiento |
+| :--- | :--- | :--- | :--- |
+| **Vía Cognitiva (Atomic AI)** | `http://localhost:8005/v1` | `:8005` | **Recomendada para agentes y programación**. Descompone la meta en pasos atómicos mediante micro-prompts SLM antes de ejecutar la inferencia. |
+| **Vía Gateway Central (LlamaLaunch)** | `http://localhost:8081/v1` | `:8081` | **Inferencia directa en bruto**. Enruta las peticiones de forma centralizada hacia el `llama-server` activo sin descomposición. |
+| **Vía Motor Físico** | `http://localhost:8080/v1` | `:8080` | Conexión directa al socket nativo de `llama-server`. |
+
+#### Auto-Detección Dinámica de Modelo (`default` o `auto`)
+No es necesario reconfigurar tus aplicaciones cada vez que cambias de modelo en LlamaLaunch:
+1. En el campo **Model Name** de tu app cliente, ingresa `default`, `auto` o `auto-detect`.
+2. Atomic AI y el Gateway consultan dinámicamente `/v1/models` y asumen el modelo que esté activo en memoria en ese instante.
+
+#### Plantilla de Configuración Universal
+- **Provider Type**: `OpenAI Compatible`
+- **Base URL**: `http://localhost:8005/v1` *(con Atomic AI)* o `http://localhost:8081/v1` *(directo)*
+- **API Key**: `llamalaunch` *(o cualquier cadena de texto)*
+- **Model Name**: `default`
+- **Streaming (SSE)**: `Enabled / Activado`
+
+---
+
 ## 🧪 Running Automated Tests
 
 To run the unit test suite verifying backend models, binaries, and API bridges:
